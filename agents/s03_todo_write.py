@@ -26,7 +26,9 @@ PLAN_REMINDER_INTERVAL = 3
 SYSTEM = f"""You are a coding agent at {WORKDIR}.
 Use the todo tool for multi-step work.
 Keep exactly one step in_progress when a task has multiple steps.
-Refresh the plan as work advances. Prefer tools over prose."""
+Refresh the plan as work advances. Prefer tools over prose.
+CRITICAL: You MUST call this tool BEFORE any other actions to initialize or update the session plan. 
+Failure to do so will result in task failure."""
 
 
 @dataclass
@@ -72,9 +74,15 @@ class TodoManager:
 
         if in_progress_count > 1:
             raise ValueError("Only one plan item can be in_progress")
+        if len(items) < len(self.state.items) and not all(t.status == "completed" for t in self.state.items):
+            # 警告 AI：你是不是漏掉了一些还没做完的任务？
+            return "ERROR: Plan rejected! You cannot remove unfinished tasks. Please provide the full task list."
 
         self.state.items = normalized
         self.state.rounds_since_update = 0
+
+        rendered_plan = self.render()
+        print(f"\033[32m📝 Updated session plan:\n{rendered_plan}\033[0m\n")  
         return self.render()
 
     def note_round_without_update(self) -> None:
@@ -96,7 +104,7 @@ class TodoManager:
             marker = {
                 "pending": "[ ]",
                 "in_progress": "[>]",
-                "completed": "[x]",
+                "completed": "[ok]",
             }[item.status]
             line = f"{marker} {item.content}"
             if item.status == "in_progress" and item.active_form:
@@ -175,10 +183,35 @@ TOOL_HANDLERS = {
     "read_file": lambda **kw: run_read(kw["path"], kw.get("limit")),
     "write_file": lambda **kw: run_write(kw["path"], kw["content"]),
     "edit_file": lambda **kw: run_edit(kw["path"], kw["old_text"], kw["new_text"]),
-    "todo": lambda **kw: TODO.update(kw["items"]),
+    "todo": lambda **kw: TODO.update(kw.get("items", [])),
 }
 
 TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "todo",
+            "description": "CRITICAL: MANDATORY FIRST STEP. Use this tool to initialize/update the session plan before any other actions.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "items": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "content": {"type": "string"},
+                                "status": {"type": "string", "enum": ["pending", "in_progress", "completed"]},
+                                "activeForm": {"type": "string"}
+                            },
+                            "required": ["content", "status"]
+                        }
+                    }
+                },
+                "required": ["items"]
+            }
+        }
+    },
     {
         "type": "function", # OpenAI 格式必须包含这一层
         "function": {
@@ -254,55 +287,76 @@ def extract_text(content) -> str:
     return "\n".join(texts).strip()
 
 
+
 def agent_loop(messages: list) -> None:
     while True:
-        # 注意：Qwen 走的是 OpenAI 格式的 client
         response = client.chat.completions.create(
             model=MODEL,
-            messages=messages, # Qwen 对合并消息的要求没 Claude 那么变态，可以先简化
+            messages=messages,
             tools=TOOLS,
         )
-        message = response.choices[0].message
-        messages.append(message) # 把 AI 的回复（含 tool_calls）存入历史
+        
+        raw_msg = response.choices[0].message
+        
+        # 1. 归一化 Assistant 消息
+        assistant_msg = {
+            "role": "assistant",
+            "content": raw_msg.content or ""
+        }
+        if raw_msg.tool_calls:
+            assistant_msg["tool_calls"] = raw_msg.tool_calls
+        messages.append(assistant_msg)
 
-        # 检查是否结束（Qwen 没有 stop_reason == "tool_use"，我们看 tool_calls）
-        if not message.tool_calls:
-            if message.content:
-                print(f"\nAI: {message.content}")
-            return
+        # 如果没有工具调用，打印 AI 的话并结束
+        if not raw_msg.tool_calls:
+            if raw_msg.content:
+                print(f"\nAI: {raw_msg.content}")
+            break
 
-
-        results = []
+        tool_results = []
         used_todo = False
-        for tool_call in message.tool_calls:
+        
+        # 2. 遍历工具调用 (注意变量名是 raw_msg)
+        for tool_call in raw_msg.tool_calls:
             name = tool_call.function.name
-            # 关键：Qwen 返回的是字符串，需要转字典
-            
             args = json.loads(tool_call.function.arguments)
-            
-            handler = TOOL_HANDLERS.get(name)
-            if handler:
-                # 依然可以使用 ** 解包，非常方便
-                output = handler(**args)
+            # --- 强行拦截：没计划，不准干活 ---
+            if not TODO.state.items and name != "todo":
+                output = "CRITICAL ERROR: You must initialize the 'todo' list BEFORE using other tools. Task aborted until plan is created."
+                print(f"\033[31m拦截：AI 试图跳过计划直接调用 {name}\033[0m")
             else:
-                output = f"Unknown tool: {name}"
+                handler = TOOL_HANDLERS.get(name)
+                output = handler(**args) if handler else f"Unknown tool: {name}"
 
             print(f"\033[33m🚀 执行 {name}: {args}\033[0m")
             print(f"📄 输出: {str(output)[:100]}...")
-            results.append({"type": "tool_result", "tool": name, "output": output})
-            if tool_call.function.name == "todo":
+
+            # 3. 构造符合 OpenAI 标准的 tool 消息
+            tool_results.append({
+                "role": "tool",
+                "tool_call_id": tool_call.id,
+                "name": name,
+                "content": str(output) # 必须是字符串
+            })
+            
+            if name == "todo":
                 used_todo = True
 
+        # 4. 处理 Todo 逻辑
         if used_todo:
             TODO.state.rounds_since_update = 0
         else:
             TODO.note_round_without_update()
             reminder = TODO.reminder()
             if reminder:
-                results.insert(0, {"type": "text", "text": reminder})
+                # 提示：Qwen 比较吃这一套，把提醒作为一条单独的 user 消息发给它
+                tool_results.append({
+                    "role": "user",
+                    "content": f"[SYSTEM REMINDER] {reminder}"
+                })
 
-        messages.append({"role": "user", "content": results})
-
+        # 5. 关键：将所有结果“平铺”加入消息历史
+        messages.extend(tool_results)
 
 if __name__ == "__main__":
     history = []
@@ -317,7 +371,7 @@ if __name__ == "__main__":
         history.append({"role": "user", "content": query})
         agent_loop(history)
 
-        final_text = extract_text(history[-1].content)
+        final_text = extract_text(history[-1].get("content", ""))
         if final_text:
             print(final_text)
         print()
