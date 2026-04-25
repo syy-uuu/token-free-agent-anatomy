@@ -43,15 +43,12 @@ isolated tool context -- same pattern as this teaching implementation.
     +-------------------+------------------+----------------------------------+
 """
 
-import os
+
 import re
 import subprocess
 from pathlib import Path
-
-from dataclasses import dataclass, field
-from pathlib import Path
 from openai import OpenAI
-import json
+
 
 
 WORKDIR = Path.cwd()
