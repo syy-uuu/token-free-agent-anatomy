@@ -48,7 +48,7 @@ import re
 import subprocess
 from pathlib import Path
 from openai import OpenAI
-
+import json
 
 
 WORKDIR = Path.cwd()
@@ -334,7 +334,7 @@ def agent_loop(messages: list):
         for tool_call in message.tool_calls:
             name = tool_call.function.name
             # 解析 JSON 参数
-            import json
+
             args = json.loads(tool_call.function.arguments)
             
             if name == "task":

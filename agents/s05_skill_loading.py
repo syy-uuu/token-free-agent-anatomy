@@ -216,6 +216,7 @@ TOOL_HANDLERS = {
     "edit_file": lambda **kw: run_edit(kw["path"], kw["old_text"], kw["new_text"]),
     "load_skill": lambda **kw: run_load_skill(kw["name"]),
 }
+
 TOOLS = [
     {
         "type": "function",
