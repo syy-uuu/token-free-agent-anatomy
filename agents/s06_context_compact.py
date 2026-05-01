@@ -30,12 +30,12 @@ MODEL = "qwen2.5:latest"
 
 SYSTEM = (
     f"You are a coding agent at {WORKDIR}. "
-    "Keep working step by step, and use compact if the conversation gets too long."
+    "Don't chat, just execute tools and keep making progress. If you need to summarize the conversation to free up context, use the 'compact' tool."
 )
 
-CONTEXT_LIMIT = 5000
+CONTEXT_LIMIT = 10000
 KEEP_RECENT_TOOL_RESULTS = 3
-PERSIST_THRESHOLD = 3000
+PERSIST_THRESHOLD = 2000
 PREVIEW_CHARS = 2000
 TRANSCRIPT_DIR = WORKDIR / ".transcripts"
 TOOL_RESULTS_DIR = WORKDIR / ".task_outputs" / "tool-results"
@@ -80,28 +80,33 @@ def persist_large_output(tool_use_id: str, output: str) -> str:
     )
 
 
-def collect_tool_result_blocks(messages: list) -> list[tuple[int, int, dict]]:
-    blocks = []
-    for message_index, message in enumerate(messages):
-        content = message.get("content")
-        if message.get("role") != "user" or not isinstance(content, list):
-            continue
-        for block_index, block in enumerate(content):
-            if isinstance(block, dict) and block.get("type") == "tool_result":
-                blocks.append((message_index, block_index, block))
-    return blocks
+def collect_tool_result_blocks(messages: list) -> list[dict]:
+    """
+    [适配 OpenAI] 提取所有角色为 'tool' 的消息对象。
+    """
+    # 直接过滤出所有工具返回消息
+    return [msg for msg in messages if msg.get("role") == "tool"]
 
 
 def micro_compact(messages: list) -> list:
-    tool_results = collect_tool_result_blocks(messages)
-    if len(tool_results) <= KEEP_RECENT_TOOL_RESULTS:
+    """
+    [适配 OpenAI] 对较早的工具执行结果进行内容抹除，只保留最近的 N 个结果。
+    """
+    # 1. 识别出所有的工具消息
+    tool_messages = [msg for msg in messages if msg.get("role") == "tool"]
+    
+    # 2. 如果总数没达到阈值 (KEEP_RECENT_TOOL_RESULTS)，则不进行压缩
+    if len(tool_messages) <= KEEP_RECENT_TOOL_RESULTS:
         return messages
 
-    for _, _, block in tool_results[:-KEEP_RECENT_TOOL_RESULTS]:
-        content = block.get("content", "")
-        if not isinstance(content, str) or len(content) <= 120:
-            continue
-        block["content"] = "[Earlier tool result compacted. Re-run the tool if you need full detail.]"
+    # 3. 对除了最近几个之外的所有旧工具消息进行“模糊化”处理
+    # 注意：messages 是引用传递，直接修改 msg["content"] 即可原地生效
+    for msg in tool_messages[:-KEEP_RECENT_TOOL_RESULTS]:
+        content = msg.get("content", "")
+        # 只有内容较长且是字符串时才压缩，避免重复压缩或破坏结构
+        if isinstance(content, str) and len(content) > 120:
+            msg["content"] = "[Earlier tool result compacted. Re-run the tool if you need full detail.]"
+            
     return messages
 
 
@@ -127,6 +132,7 @@ def summarize_history(messages: list) -> str:
         "4. Remaining work\n"
         "5. User constraints and preferences\n"
         "Be compact but concrete.\n\n"
+        "strict limit: Keep the summary under 500 words"
         f"{conversation}"
     )
 
@@ -142,6 +148,7 @@ def summarize_history(messages: list) -> str:
 
 
 def compact_history(messages: list, state: CompactState, focus: str | None = None) -> list:
+    # --- 原有逻辑：备份与准备摘要 ---
     transcript_path = write_transcript(messages)
     print(f"[transcript saved: {transcript_path}]")
 
@@ -155,13 +162,21 @@ def compact_history(messages: list, state: CompactState, focus: str | None = Non
     state.has_compacted = True
     state.last_summary = summary
 
-    return [{
+    # --- 这里是核心改动：构造新起点 ---
+    new_start = [{
         "role": "user",
         "content": (
-            "This conversation was compacted so the agent can continue working.\n\n"
+            "### SYSTEM NOTIFICATION: CONVERSATION COMPACTED\n"
+            "The previous messy history has been archived. "
+            "Please continue working based on this summary:\n\n"
             f"{summary}"
         ),
     }]
+
+    # --- 💡 关键改动：原地替换 ---
+    messages[:] = new_start # <-- 这是对的，把桌子上的废纸全扫掉，换成新摘要
+    
+    return messages
 
 
 def safe_path(path_str: str) -> Path:
@@ -353,14 +368,16 @@ def flatten_messages(messages):
     return new_messages
 
 
+
 def agent_loop(messages: list, state: CompactState) -> None:
     while True:
+        # 1. 前置压缩
         messages[:] = micro_compact(messages)
-
         if estimate_context_size(messages) > CONTEXT_LIMIT:
             print("[auto compact]")
             messages[:] = compact_history(messages, state)
 
+        # 2. 获取响应
         response = client.chat.completions.create(
             model=MODEL,
             messages=flatten_messages(messages),
@@ -368,62 +385,76 @@ def agent_loop(messages: list, state: CompactState) -> None:
         )
         
         message = response.choices[0].message
-        messages.append(message.model_dump()) # 直接添加 message 对象，OpenAI 库会自动处理
+        messages.append(message.model_dump())
 
-        # 2. 打印 Master 的话 (解决你的“沉默”问题)
-        if message.content:
-            print(f"\nMaster: {message.content}")
-        
-        # 存入原始 history，model_dump() 确保保留了 tool_calls 结构
-        messages.append(message.model_dump()) 
-
-        # 打印对话
-        if message.content:
-            print(f"\nMaster: {message.content}")
-
-        # --- 3. 判断是否需要执行动作 ---
-        if not message.tool_calls:
-            # 如果模型没有下达任何工具指令，说明任务阶段性完成，停下来等用户输入
-            return
-
+        # 3. 提取状态变量
+        has_tools = bool(message.tool_calls)
         manual_compact = False
         compact_focus = None
-        for tool_call in message.tool_calls:
-            name = tool_call.function.name
-            # 关键：Qwen 返回的是字符串，需要转字典
-            
-            try:
-                args = json.loads(tool_call.function.arguments)
-            except json.JSONDecodeError:
-                args = {}
-            
-            handler = TOOL_HANDLERS.get(name)
-            if handler:
-                # 依然可以使用 ** 解包，非常方便
-                output = handler(**args)
-            else:
-                output = f"Unknown tool: {name}"
 
-            print(f"\033[33m🚀 执行 {name}: {args}\033[0m")
-            print(f"📄 输出: {str(output)[:100]}...")
+        # --- [执行动作优先] ---
+        if has_tools:
+            for tool_call in message.tool_calls:
+                name = tool_call.function.name
+                try:
+                    args = json.loads(tool_call.function.arguments)
+                except:
+                    args = {}
+                
+                print(f"\033[33m🚀 执行 {name}: {args}\033[0m")
+                
+                # 标记压缩指令
+                if name == "compact":
+                    manual_compact = True
+                    compact_focus = args.get("name") or args.get("focus")
+                    continue
 
-            if name == "compact":
-                manual_compact = True
-                compact_focus = args.get("name") or args.get("focus")
+                handler = TOOL_HANDLERS.get(name)
+                output = handler(**args) if handler else f"Unknown tool: {name}"
+                
+                print(f"📄 输出: {str(output)[:100]}...")
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "name": name,
+                    "content": str(output)
+                })
 
-            print(f"\033[33m🚀 执行 {name}: {args}\033[0m")
-
-
+        # --- [拦截逻辑后置：只在确实没调工具时拦截] ---
+        available_tools = list(TOOL_HANDLERS.keys())
+        mentions_tool = any(tool_name in (message.content or "") for tool_name in available_tools)
+        has_simulated_tag = "```" in (message.content or "") or "<tool" in (message.content or "").lower()
+        
+        # 💡 只有在真的没发 tool_calls，且文本里在装模作样时，才拦截
+        if (mentions_tool or has_simulated_tag) and not has_tools:
+            print("\033[31m⚠️  检测到通用幻觉：纠正中...\033[0m")
             messages.append({
-                "role": "tool",
-                "tool_call_id": tool_call.id,
-                "name": name,
-                "content": str(output)
+                "role": "user", 
+                "content": "Note: You mentioned tools or code but didn't issue a real tool_call. Please use the tool_call schema now."
             })
+            continue
 
+        if message.content:
+            print(f"\nMaster: {message.content}")
+
+        # --- [处理压缩跳转] ---
         if manual_compact:
+            if len(messages) < 5: 
+                print("⚠️  拦截高频压缩")
+                messages.append({"role": "user", "content": "Already compacted. Please proceed."})
+                continue
+            
             print("[manual compact]")
-            messages[:] = compact_history(messages, state, focus=compact_focus)
+            compact_history(messages, state, focus=compact_focus)
+            continue
+
+        # --- [最终出口判断] ---
+        # 如果发了工具（且已经执行完并 append 了结果），继续下一轮让 AI 总结结果
+        if has_tools:
+            continue
+        
+        # 只有在 AI 没调工具、也没幻觉、也没压缩的情况下，才停下来等用户
+        break
 
 
 if __name__ == "__main__":

@@ -1,0 +1,1 @@
+# Emerald-Bot initialized.
