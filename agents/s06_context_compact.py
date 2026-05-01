@@ -115,7 +115,9 @@ def write_transcript(messages: list) -> Path:
 
 
 def summarize_history(messages: list) -> str:
+    # 将列表转换为 JSON 字符串作为输入，注意不要超出模型的单次处理限制
     conversation = json.dumps(messages, default=str)[:80000]
+    
     prompt = (
         "Summarize this coding-agent conversation so work can continue.\n"
         "Preserve:\n"
@@ -127,12 +129,16 @@ def summarize_history(messages: list) -> str:
         "Be compact but concrete.\n\n"
         f"{conversation}"
     )
-    response = client.messages.create(
+
+    # 修复点：改用 OpenAI 的调用方式
+    response = client.chat.completions.create(
         model=MODEL,
         messages=[{"role": "user", "content": prompt}],
         max_tokens=2000,
     )
-    return response.content[0].text.strip()
+    
+    # 修复点：OpenAI 的返回对象获取内容的方式也不同
+    return response.choices[0].message.content.strip()
 
 
 def compact_history(messages: list, state: CompactState, focus: str | None = None) -> list:
