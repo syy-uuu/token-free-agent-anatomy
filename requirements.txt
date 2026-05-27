@@ -1,1 +1,11 @@
-openai
+# ───────────────────────────────────────────────────────────
+# Stage 1 Core Dependencies (Verified Local Env)
+# ───────────────────────────────────────────────────────────
+
+# 🧠 Core LLM & Validation
+openai==2.37.0
+pydantic==2.13.4
+python-dotenv==1.2.2
+
+# 🛠️ System Utilities
+dotenv==0.9.9
