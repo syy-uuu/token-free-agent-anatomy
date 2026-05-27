@@ -57,7 +57,7 @@ Unlike heavy frameworks, this repository acts as a transparent microscope. It fe
 ### 1. Clone the Project & Spin up Virtual Environment
 ```bash
 git clone <your-new-repo-url>
-cd token-free-local-agent-1
+cd token-free-agent-anatomy
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
