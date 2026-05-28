@@ -65,9 +65,34 @@ def main():
     elif choice == '2':
         config.set_stage_workdir("stage2")
         print("\n🚀  in processing: Stage 2 Plan to Do...\n")
-
-        # from agents.s2_MultiFile import agent_loop_stage2
-        print("⚠️ Stage 2 is under development. Stay tuned for the next release! ⚠️")
+        
+        # Import the Dual-Loop Orchestrator core
+        from agents.s2_Plantodo import run_orchestrator
+        
+        try:
+            prompt = f"{AgentLogger.COLOR_QUERY}Enter your complex macro-level goal (Press Enter twice to send, 'q' to quit):\n {AgentLogger.COLOR_RESET}"
+            user_goal = get_multiline_input(prompt)
+        except (EOFError, KeyboardInterrupt):
+            return
+            
+        if user_goal.strip().lower() in ("q", "exit", ""):
+            return
+            
+        # 1. Capture the macro-intent and route it to the Orchestrator
+        logger.log_user_to_harness(user_goal)
+        
+        # Trigger the Dual-Loop execution (Planner -> todo.json -> Executor ReAct)
+        run_orchestrator(user_goal)
+        print()
+        
+        # Save the full execution transcript if specified
+        if SHOULD_SAVE:
+            history_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logger_history")
+            os.makedirs(history_dir, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+            log_filename = f"stage2_{timestamp}.txt"               
+            full_log_path = os.path.join(history_dir, log_filename)
+            logger.flush_to_disk(full_log_path)
         
     elif choice.lower() == 'q':
         print("Goodbye! 。")

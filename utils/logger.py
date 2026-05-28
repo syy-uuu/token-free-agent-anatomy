@@ -4,12 +4,13 @@ import json
 import re
 
 class AgentLogger:
-    COLOR_HUMAN_INTERFACE = '\033[1;36m'   
-    COLOR_BRAIN_PROTOCOL = '\033[1;33m'    
-    COLOR_PHYSICAL_SANDBOX = '\033[1;35m'  
-    COLOR_QUERY = '\033[1;32m'    
-    COLOR_SYSTEM_ERROR = '\033[1;31m'      
-    COLOR_RESET = '\033[0m'                
+    COLOR_HUMAN_INTERFACE = '\033[1;36m'   # Cyan
+    COLOR_BRAIN_PROTOCOL = '\033[1;33m'    # Yellow
+    COLOR_PHYSICAL_SANDBOX = '\033[1;35m'  # Magenta
+    COLOR_QUERY = '\033[1;32m'             # Green
+    COLOR_SYSTEM_ERROR = '\033[1;31m'      # Red
+    COLOR_ORCHESTRATOR = '\033[1;34m'      # Blue (Macro Control)
+    COLOR_RESET = '\033[0m'                # Reset
 
     def __init__(self, save_log: bool = False):
         self.save_log = save_log
@@ -29,6 +30,10 @@ class AgentLogger:
     def _get_prefix(self, name: str) -> str:
         self.communication_count += 1
         return f"[{self._get_timestamp()}] 🔗 [EVENT #{self.communication_count}] : {name}"
+    
+    # ==========================================
+    # STAGE 1 Channels (Kept perfectly intact)
+    # ==========================================
 
     def log_user_to_harness(self, query: str):
         """1. USER ➔ HARNESS"""
@@ -75,6 +80,42 @@ class AgentLogger:
         body = f"{self.COLOR_HUMAN_INTERFACE}{final_answer.strip()}{self.COLOR_RESET}\n" + "=================================================="
         self._record_and_print(header + "\n" + body)
 
+    # ==========================================
+    # NEW: STAGE 2 Channels (Macro Orchestration)
+    # ==========================================
+    def log_orchestrator_info(self, info: str):
+        """Macro Orchestrator State Messages (Blue)"""
+        header = f"\n{self.COLOR_ORCHESTRATOR}{self._get_prefix('ORCHESTRATOR HUB')}{self.COLOR_RESET}"
+        body = f"{self.COLOR_ORCHESTRATOR}{info.strip()}{self.COLOR_RESET}\n" + "•"*60
+        self._record_and_print(header + "\n" + body)
+
+    def log_orchestrator_success(self, message: str):
+        """Global Terminal Success Confirmation (Green)"""
+        header = f"\n{self.COLOR_QUERY}{self._get_prefix('GLOBAL SUCCESS ACHIEVED')}{self.COLOR_RESET}"
+        body = f"{self.COLOR_QUERY}{message.strip()}{self.COLOR_RESET}\n" + "★"*60
+        self._record_and_print(header + "\n" + body)
+
+    def log_orchestrator_warning(self, alert: str):
+        """System self-healing trigger alerts (Red/Warning)"""
+        header = f"\n{self.COLOR_SYSTEM_ERROR}{self._get_prefix('ORCHESTRATOR ALERT / RE-PLANNING')}{self.COLOR_RESET}"
+        body = f"{self.COLOR_SYSTEM_ERROR}{alert.strip()}{self.COLOR_RESET}\n" + "▲"*60
+        self._record_and_print(header + "\n" + body)
+
+    def log_executor_round(self, round_info: str):
+        """Granular internal loop step marker"""
+        message = f"{self.COLOR_QUERY}➔ {round_info}{self.COLOR_RESET}"
+        self._record_and_print(message)
+
+    def flush_to_disk(self, file_name="sample_log.txt"):
+        if self.save_log and self.log_buffer:
+            with open(file_name, "w", encoding="utf-8") as f:
+                f.write("\n".join(self.log_buffer))
+            print(f"\n💾 [SYSTEM INFO]: logger saved to: {file_name} (totally {self.communication_count} times communication)")
+
+
+    # ==========================================
+    # logger save to disk (optional)
+    # ==========================================
     def flush_to_disk(self, file_name="sample_log.txt"):
 
         if self.save_log and self.log_buffer:
