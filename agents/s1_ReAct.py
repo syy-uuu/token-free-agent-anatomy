@@ -1,6 +1,4 @@
 import json
-
-from utils.logger import AgentLogger
 from utils.config import config
 from static_tools import STATIC_SCHEMAS, STATIC_HANDLERS
 
@@ -8,73 +6,195 @@ from static_tools import STATIC_SCHEMAS, STATIC_HANDLERS
 client = config.client
 MODEL = config.model
 
+import json
 
+import json
+import re
+
+def clean_and_parse_json_line(line: str):
+    """
+    工业级防御性探针：专门清洗大模型由于 Attention 稀释导致的非标 JSON 连击毛刺
+    例如：{"name": "...", "arguments": {...}}} -> 尾部多了一个 }
+    """
+    line = line.strip()
+    if not line:
+        return None
+        
+    # 尝试直接解析
+    try:
+        return json.loads(line)
+    except Exception:
+        pass
+
+    # 算法防御自愈：如果是由于尾部多写了闭合括号导致的报错，进行物理裁剪
+    # 从右侧查找最后一个完美的 JSON 闭合结构
+    if line.endswith("}}}"):
+        try:
+            return json.loads(line[:-1]) # 切掉最后一个多余的 }
+        except Exception:
+            pass
+
+    # 备用方案：通过正则强行提取最外层匹配的 {} 块
+    try:
+        match = re.search(r'(\{.*?\})(?=\s*$)|\{.*\}', line)
+        if match:
+            return json.loads(match.group(0))
+    except Exception:
+        pass
+        
+    return None
 
 def agent_loop(state: list, logger):
     turn_counter = 0
-    while True:
+    max_turns = 30  # 防御硬极限中断
+    
+    while turn_counter < max_turns:
         turn_counter += 1
         
-        # 2. HARNESS ➔ LLM
+        # 1. HARNESS ➔ LLM
         logger.log_harness_to_llm(state)
         
         current_tool_choice = "required" if turn_counter == 1 else "auto"
-        response = client.chat.completions.create(
-            model=MODEL,
-            messages=state,
-            tools=STATIC_SCHEMAS,
-            tool_choice=current_tool_choice,
-        )
+        
+        try:
+            response = client.chat.completions.create(
+                model=MODEL,
+                messages=state,
+                tools=STATIC_SCHEMAS,
+                tool_choice=current_tool_choice,
+                timeout=60.0  # 超时自愈拦截
+            )
+        except Exception as ce:
+            print(f"\n[TIMEOUT/ERROR] API Request failed: {str(ce)}\n")
+            return f"Harness Interrupt: API Call Failed ({str(ce)})"
 
         message = response.choices[0].message
-        state.append(message)
+        print(f"\n[Step {turn_counter}] [Debug] LLM Response: {message}\n")
         
-        # 3. LLM ➔ HARNESS
+        actions_to_execute = []
         raw_brain_output = ""
-        if message.content:
-            raw_brain_output += f"[Message]: {message.content}\n"
+
+        # ==================== 【收拢解析层】 ====================
+
+        # 轨 A：处理标准 tool_calls
         if message.tool_calls:
             for tc in message.tool_calls:
-                raw_brain_output += f"[Tool Call]: {tc.function.name}({tc.function.arguments})"
-        
-        logger.log_llm_to_harness(raw_brain_output)
+                raw_brain_output += f"[Standard Tool Call]: {tc.function.name}({tc.function.arguments})\n"
+                try:
+                    args_dict = json.loads(tc.function.arguments) if isinstance(tc.function.arguments, str) else tc.function.arguments
+                except Exception:
+                    args_dict = tc.function.arguments
 
-        # 4. LLM ➔ USER / HARNESS ➔ SYSTEM
-        if message.content and not message.tool_calls:
-            # 6. HARNESS ➔ USER
-            logger.log_harness_to_user(message.content)
+                actions_to_execute.append({
+                    "id": tc.id,
+                    "name": tc.function.name,
+                    "arguments": args_dict if isinstance(args_dict, dict) else {}
+                })
 
-            if turn_counter == 1:
-                state.append({"role": "user", "content": "Please proceed with the tool executions now."})
-                continue
-
-        if message.tool_calls:
-            tool_call = message.tool_calls[0]  
+        # 轨 B：拦截并清洗大模型在 content 里手写的 JSON 乱象
+        if message.content:
+            raw_brain_output += f"[Message Text]: {message.content}\n"
             
-            # 4-1. HARNESS ➔ SYSTEM
-            logger.log_harness_to_system(tool_name=tool_call.function.name, args=tool_call.function.arguments)
+            if not actions_to_execute:
+                content_str = message.content.strip()
+                
+                # 逐行切开并推入物理清洗探针
+                for line_idx, line in enumerate(content_str.split('\n')):
+                    parsed_line = clean_and_parse_json_line(line)
+                    if not parsed_line:
+                        continue
+                        
+                    try:
+                        # 支持直升根节点或嵌套在 action 对象里的定义
+                        a_name = parsed_line.get("name") or parsed_line.get("action", {}).get("name")
+                        a_args = parsed_line.get("arguments") or parsed_line.get("action", {}).get("arguments")
+                        
+                        if a_name:
+                            if isinstance(a_args, str):
+                                try:
+                                    a_args = json.loads(a_args)
+                                except Exception:
+                                    pass
+                            
+                            raw_brain_output += f"[Extracted JSON Tool]: {a_name}({json.dumps(a_args)})\n"
+                            actions_to_execute.append({
+                                "id": f"call_extracted_{turn_counter}_{line_idx}",
+                                "name": a_name,
+                                "arguments": a_args if isinstance(a_args, dict) else {}
+                            })
+                    except Exception:
+                        pass
+
+        # ==================== 【上下文记忆协议对齐】 ====================
+        
+        # 核心防空转自愈：如果抓到了轨 B 工具，在推入上下文历史前，强行转换为标准 tool_calls 格式
+        if actions_to_execute and not message.tool_calls:
+            aligned_tool_calls = []
+            for action in actions_to_execute:
+                aligned_tool_calls.append({
+                    "id": action["id"],
+                    "type": "function",
+                    "function": {
+                        "name": action["name"],
+                        "arguments": json.dumps(action["arguments"], ensure_ascii=False)
+                    }
+                })
+            message.tool_calls = aligned_tool_calls
+
+        # 安全合流推入历史记录
+        state.append(message)
+
+        # ==================== 【决策与物理执行层】 ====================
+
+        # 情况 1：无有效工具，属于正常自然语言结束或开场白
+        if not actions_to_execute:
+            if message.content:
+                logger.log_harness_to_user(message.content)
+                
+                if turn_counter == 1:
+                    state.append({"role": "user", "content": "Please proceed with the tool executions now."})
+                    continue
+            
+            final_output = message.content if message.content else ""
+            break
+
+        # 情况 2：并发/多连击工具物理落地
+        for action in actions_to_execute:
+            t_id = action["id"]
+            t_name = action["name"]
+            t_args = action["arguments"]
+            
+            # 4-1. HARNESS ➔ SYSTEM 广播
+            logger.log_harness_to_system(tool_name=t_name, args=json.dumps(t_args, ensure_ascii=False))
             
             is_error = False
             try:
-                if tool_call.function.name in STATIC_HANDLERS:
-                    result = STATIC_HANDLERS[tool_call.function.name](**json.loads(tool_call.function.arguments))
+                if t_name in STATIC_HANDLERS:
+                    # 真正物理击打磁盘和控制台
+                    result = STATIC_HANDLERS[t_name](**t_args)
                 else:
-                    result = f"Error: Unknown tool '{tool_call.function.name}'"
+                    result = f"Error: Unknown tool '{t_name}'"
                     is_error = True
             except Exception as e:
                 result = f"Runtime Error during execution: {str(e)}"
                 is_error = True
             
-            # 5. SYSTEM ➔ HARNESS
-            logger.log_system_to_harness(tool_name=tool_call.function.name, observation=result, is_error=is_error)
+            # 5. SYSTEM ➔ HARNESS 观测回传
+            logger.log_system_to_harness(tool_name=t_name, observation=result, is_error=is_error)
             
+            # 物理拼装回传协议树（保证每个伪造 ID 和原始定义绝对绑定）
             state.append({
                 "role": "tool",
-                "tool_call_id": tool_call.id,
-                "content": result
+                "tool_call_id": t_id,
+                "name": t_name,
+                "content": str(result)
             })
-            continue
-        final_output = message.content if message.content else ""
-        break
-    return final_output   
-    
+
+        # 完成多连击，继续推进循环大盘
+        continue
+
+    else:
+        print(f"\n[SYSTEM CRASH] Error: Max steps ({max_turns}) reached. Safety circuit breaker triggered.")
+        final_output = "Error: Max steps reached. Process terminated by Harness Guard."
+        
+    return final_output
