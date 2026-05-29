@@ -195,8 +195,7 @@ class LocalExecutorAgent:
                 self.logger.audit("LLM", "EXECUTOR", "Observation", f"Round {step_count}", result=content)
 
                 # 4. “成功协议”握手 (JSON 协议优先)
-                # 建议：如果 LLM 输出里包含 {"status": "completed"}，视为胜利
-                if "success" in content.lower() or '"status": "completed"' in content:
+                if "task_completed" in content.lower() or '"status": "completed"' in content:
                     self.logger.audit("EXECUTOR", "PLANNER", "Success", "Task completed.")
                     return True, content
 
