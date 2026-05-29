@@ -1,6 +1,5 @@
-# tools/file_ops.py
-
 from static_tools.base import safe_path
+import os
 
 
 # --- 1. Schemas ---
@@ -50,7 +49,24 @@ FILE_TOOLS_SCHEMAS = [
                 "required": ["path", "old_text", "new_text"]
             }
         }
+    },
+    {
+    "type": "function",
+    "function": {
+        "name": "mkdir",
+        "description": "CRITICAL: MUST use this tool whenever you need to create a new directory or workspace folder. NEVER assume a directory exists. This tool safely creates the target directory and will automatically create any missing parent directories in the path (equivalent to mkdir -p). Check if the directory structure is correct before calling.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "The relative or absolute path of the directory to be created. Do not use vague or empty paths."
+                }
+            },
+            "required": ["path"]
+        }
     }
+}
 ]
 
 # --- 2. Handlers ---
@@ -93,3 +109,37 @@ def run_edit(path: str, old_text: str, new_text: str) -> str:
         return f"Success: File '{path}' updated."
     except Exception as e:
         return f"Error editing file: {str(e)}"
+
+    
+def handle_mkdir(arguments: dict) -> str:
+# 1. 刚性提取参数
+    path_str = arguments.get("path")
+    if not path_str:
+        return "ERROR: Missing required argument 'path'."
+        
+    try:
+        # 2. 调用你的通用安全路径校验器进行物理越权拦截
+        # 如果越权，这里会直接抛出 ValueError 并被下面的 except 捕获
+        target_path = safe_path(path_str)
+
+        # 3. 幂等性检查（避免无效的磁盘 IO）
+        if target_path.exists():
+            if target_path.is_dir():
+                return f"OBSERVATION: Directory '{path_str}' already exists. No action needed."
+            else:
+                return f"ERROR: Path '{path_str}' exists but it is a FILE, cannot convert to directory."
+
+        # 4. 物理落地：级联创建目录 (等价于 mkdir -p)
+        # exist_ok=True 预防多线程并发冲突，parents=True 开启多级级联创建
+        target_path.mkdir(parents=True, exist_ok=True)
+        
+        # 5. 返回确定性的物理成功反馈
+        return f"OBSERVATION: Success. Directory '{path_str}' and all its missing parents have been physically created within the secure workspace."
+
+    except ValueError as ve:
+        # 专门拦截并优雅返回安全越权报错，直接把异常甩回大模型脸上，警示它越界了
+        return f"ERROR: Security Violation. {str(ve)}"
+        
+    except Exception as e:
+        # 兜底其余系统级物理报错（如磁盘满、无权限等）
+        return f"ERROR: Failed to create directory due to system error: {str(e)}"
