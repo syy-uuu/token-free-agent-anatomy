@@ -1,6 +1,7 @@
 import os
 import sys
 from datetime import datetime
+from utils.config import config
 
 from utils.config import config, get_multiline_input
 
@@ -24,7 +25,7 @@ def main():
     SHOULD_SAVE = True  
     
 
-    
+    print(f"Current model: {config.model}")
     print("select agent:")
     print(" [1] Stage 1: Standard ReAct Loop)")
     print(" [2] Stage 2: Plan to do (coming soon)")
@@ -41,7 +42,7 @@ def main():
         SYSTEM = (
                 f"You are a hardcore token-free coding agent at {config.workdir}. Use tools to solve tasks.\n"
                 f"CRITICAL RULES:\n"
-                f"1. ACT, DO NOT EXPLAIN. Never just type code blocks in text (content). You must physically write files using 'write_file' and physically execute commands using 'bash'.\n"
+                f"1. ACT, DO NOT EXPLAIN. Never just type code blocks in text (content). YOU MUST use tool_calls method in your messageswhen you want to use any tools.\n"
                 f"2. CLI ENTRYPOINT REQUIREMENT: Any Python script you write MUST contain a proper '__main__' block or executing logic that explicitly prints (sys.stdout) the results to the terminal, otherwise bash will return no output.\n"
                 f"3. BUG LOOP PREVENTION: If your bash command returns no output or unexpected results, do not repeat the same command. You must check the file content, rewrite the script to add print statements or debugging info, and re-run."
                         )

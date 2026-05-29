@@ -61,8 +61,7 @@ def agent_loop(state: list, logger):
                 model=MODEL,
                 messages=state,
                 tools=STATIC_SCHEMAS,
-                tool_choice=current_tool_choice,
-                timeout=60.0  # 超时自愈拦截
+                tool_choice=current_tool_choice
             )
         except Exception as ce:
             print(f"\n[TIMEOUT/ERROR] API Request failed: {str(ce)}\n")

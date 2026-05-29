@@ -98,7 +98,7 @@ class LocalPlannerAgent:
             {"role": "system", "content": self.system_prompt},
             {"role": "user", "content": context_prompt}
         ]
-        
+        print(f"DEBUG: Current model being invoked: {MODEL}")
         response = client.chat.completions.create(
             model=MODEL,
             messages=messages,
