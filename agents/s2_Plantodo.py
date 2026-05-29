@@ -2,6 +2,8 @@ import json
 import os
 from utils.config import config
 from agents.s1_ReAct import agent_loop
+import time
+from datetime import datetime
 
 # Initialize global configuration and logger micro-scope
 client = config.client
@@ -31,24 +33,23 @@ Your sole mission is to split a user's complex macro goal into a sequence of sma
 class LocalPlannerAgent:
     def __init__(self, logger):
         self.system_prompt = PLANNER_SYSTEM_PROMPT
-        self.logger = logger  # 依赖注入
+        self.logger = logger
 
     def generate_initial_plan(self, user_goal: str) -> list:
-        self.logger.log_harness_to_planner(f"Dissecting user goal: '{user_goal}'")
+        self.logger.log_harness_to_planner(f"{user_goal}")
         
         messages = [
             {"role": "system", "content": self.system_prompt},
             {"role": "user", "content": f"Generate a JSON task list for: {user_goal}"}
         ]
-        
-        # [统计] 交互 Message count: 2
+    
         response = client.chat.completions.create(model=MODEL, messages=messages, response_format={"type": "json_object"})
         
         plan_data = json.loads(response.choices[0].message.content)
         todo_list = plan_data.get("tasks", plan_data)
         
-        # 记录：Planner 告知 Harness 计划生成完毕
-        self.logger.log_harness_to_user(f"Generated {len(todo_list)} tasks.")
+        self.logger.log_harness_to_user(f"Generated {len(todo_list)} tasks, ask executor to start")
+        self.logger.log_harness_to_user(f"task list: {json.dumps(todo_list, ensure_ascii=False, indent=2)}")
         return todo_list
 
 
@@ -83,38 +84,39 @@ class LocalPlannerAgent:
 # 🏎️ DISSECTING ROLE 2: THE EXECUTOR (Front-Line Combat Soldier - ReAct Loop)
 # =====================================================================
 
-EXECUTOR_SYSTEM_PROMPT = """You are a cold-blooded execution agent (Executor) working in the trenches.
-Your sole mission is to complete the given micro-task by any means necessary, using your assigned tools.
+EXECUTOR_SYSTEM_PROMPT = """You are an execution agent (Executor).
+Your mission is to perform the specific micro-task assigned by the Planner.
 
-[OPERATIONAL PROTOCOL]
-1. You MUST interact with the environment exclusively via Tool Calls (Thought -> Action -> Observation).
-2. Your current execution context is completely clean. Ignore macro-level strategies, focus ONLY on the immediate file or terminal command.
-3. Every single round, you must output your reasoning via Thought, choose a tool via Action, and wait for the physical feedback.
-4. Once the micro-task is fully validated (e.g., tests pass, file writes complete), declare victory and output your final answer to stop the loop.
+[OPERATIONAL RULES]
+1. OUTPUT FORMAT: Every response MUST be in JSON format: {"thought": "...", "action": {"name": "...", "arguments": {...}}}.
+2. CONSTRAINTS: 
+   - NO conversational filler. 
+   - NO summary of previous steps.
+   - Output ONLY the next logical command.
+3. ENVIRONMENT: Access the system ONLY via tools. Do not simulate output.
 """
 
 class LocalExecutorAgent:
     def __init__(self, logger):
         self.system_prompt = EXECUTOR_SYSTEM_PROMPT
         self.logger = logger
-        self.max_react_steps = 5  
+        self.max_react_steps = 5
 
     def execute_single_task(self, task: str) -> tuple[bool, str]:
-        self.logger.log_planner_to_executor(f"Start micro-task: {task}")
-        
+        messages = [
+            {"role": "system", "content": self.system_prompt}
+        ]
+        messages.append({"role": "user", "content": f"Execute the task: {task}"})
         step_count = 0
+        self.logger.log_harness_to_user(f"enter stage ReAct loop, round {step_count} for task: {task}")
         while step_count < self.max_react_steps:
             step_count += 1
-            # 记录：Executor ➔ Harness (物理操作)
-            self.logger.log_executor_to_harness(f"Round {step_count}: Requesting tool use for {task}")
-            
             try:
-                # 假设这里是你的执行逻辑
-                observation = agent_loop(task,logger=self.logger)  
-                # 记录：Harness ➔ Executor (物理观测)
-                self.logger.log_harness_to_executor(f"Round {step_count}: Observation: {observation}")
+                observation = agent_loop(messages, logger=self.logger)  
+                obs_str = str(observation) if observation is not None else ""
+                self.logger.log_harness_to_executor(f"Round {step_count}: Observation: {obs_str}")
                 
-                if "success" in observation.lower():
+                if "success" in obs_str.lower():
                     self.logger.log_executor_to_planner("Task succeeded.")
                     return True, observation
             except Exception as e:
@@ -130,25 +132,28 @@ class LocalExecutorAgent:
 def run_orchestrator(user_goal: str, logger):
     planner = LocalPlannerAgent(logger)
     executor = LocalExecutorAgent(logger)
-    
-    # 交互统计
-    total_interaction_messages = 0
-
-    # 1. 初始规划
     todo_list = planner.generate_initial_plan(user_goal)
-    total_interaction_messages += 2 # (Planner <-> Harness)
 
-    # 2. Outer Loop
     while True:
+        # 1. 查找当前待办事项
         current_step = next((s for s in todo_list if s["status"] == "pending"), None)
-        if not current_step: break
-            
-        # [仪表盘展示]
-        print(f"\n⚡ CURRENT STATUS: Steps Done | Total Interactions: {total_interaction_messages}")
+        if not current_step: 
+            logger.audit("Harness", "User", "Finish", "All tasks completed or no pending tasks.")
+            break
         
+        # 2. 执行任务
+        logger.log_planner_to_executor(f"Task ID {current_step['id']}: {current_step['task']}")
         success, final_observation = executor.execute_single_task(current_step["task"])
-        total_interaction_messages += 4 # (P->E, E->H, H->E, E->P) 每一轮交互更新
         
-        if not success:
+        # 3. 状态闭环逻辑
+        if success:
+            # 物理更新：直接在 todo_list 对象中原地修改状态
+            current_step["status"] = "success"
+            current_step["result"] = final_observation # 顺便存一下执行结果
+            logger.audit("Harness", "User", "Status Update", f"Task {current_step['id']} marked as success.")
+            
+        else:
+            # 失败逻辑：调用 Planner 的重规划能力
+            current_step["status"] = "failure"
+            logger.audit("Harness", "User", "Status Update", f"Task {current_step['id']} failed, re-planning...")
             todo_list = planner.replan_on_failure(todo_list, current_step["id"], final_observation)
-            total_interaction_messages += 2

@@ -37,7 +37,16 @@ def main():
         config.set_stage_workdir("stage1")
         print("\n🚀  in processing: Stage 1 ReAct ...\n")
         from agents.s1_ReAct import agent_loop
-        history = []
+        SYSTEM = (
+                f"You are a hardcore token-free coding agent at {config.workdir}. Use tools to solve tasks.\n"
+                f"CRITICAL RULES:\n"
+                f"1. ACT, DO NOT EXPLAIN. Never just type code blocks in text (content). You must physically write files using 'write_file' and physically execute commands using 'bash'.\n"
+                f"2. CLI ENTRYPOINT REQUIREMENT: Any Python script you write MUST contain a proper '__main__' block or executing logic that explicitly prints (sys.stdout) the results to the terminal, otherwise bash will return no output.\n"
+                f"3. BUG LOOP PREVENTION: If your bash command returns no output or unexpected results, do not repeat the same command. You must check the file content, rewrite the script to add print statements or debugging info, and re-run."
+                        )
+        history = [{"role":"system","content":SYSTEM}]
+        if len(history) > 20:
+            history = [history[0]] + history[-10:]
         while True:
             try:
                 prompt = f"{AgentLogger.C_USER}Enter query (Press Enter twice to send, 'q' to quit):\n {AgentLogger.C_RESET}"
@@ -51,16 +60,9 @@ def main():
             #1. USER ➔ HARNESS
             logger.log_user_to_harness(query)
             history.append({"role": "user", "content": query})
-            
             agent_loop(history, logger)
             print()
-            if SHOULD_SAVE:
-                history_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logger_history")
-                os.makedirs(history_dir, exist_ok=True)
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-                log_filename = f"stage1_{timestamp}.txt"               
-                full_log_path = os.path.join(history_dir, log_filename)
-                logger.flush_to_disk(full_log_path)
+
             
     elif choice == '2':
         config.set_stage_workdir("stage2")
@@ -84,15 +86,8 @@ def main():
         # Trigger the Dual-Loop execution (Planner -> todo.json -> Executor ReAct)
         run_orchestrator(user_goal, logger)
         print()
-        
-        # Save the full execution transcript if specified
-        if SHOULD_SAVE:
-            history_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logger_history")
-            os.makedirs(history_dir, exist_ok=True)
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-            log_filename = f"stage2_{timestamp}.txt"               
-            full_log_path = os.path.join(history_dir, log_filename)
-            logger.flush_to_disk(full_log_path)
+    
+
         
     elif choice.lower() == 'q':
         print("Goodbye! 。")

@@ -1,4 +1,0 @@
-
-[09:45:34] 🔗 [EVENT #1] : USER ➔ HARNESS
-Create a directory 'project_v1', search for all .py files in current folder, and save the list to 'project_v1/report.txt'.
-————————————————————————————————————————————————————————————

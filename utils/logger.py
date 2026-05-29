@@ -1,7 +1,7 @@
 import time
 import re
 
-class AgentLogger:
+class AgentLogger():
     # 身份色彩协议定义 (Identity Color Protocol)
     C_USER = '\033[36m'      # Cyan (用户接口)
     C_PLANNER = '\033[93m'   # Bright Yellow (战略指挥)
@@ -42,6 +42,11 @@ class AgentLogger:
             self.log_buffer.append(clean_text)
             if summary: self.message_history.append(summary)
 
+    def _append_to_disk(self, content):
+        if self.save_log and hasattr(self, 'log_file_path'):
+            with open(self.log_file_path, "a", encoding="utf-8") as f:
+                f.write(content + "\n")
+
     def audit(self, source: str, target: str, payload_type: str, content: str, result: str = None, color: str = None):
             """
             [核心审计协议]
@@ -71,7 +76,7 @@ class AgentLogger:
             if self.save_log:
                 clean_text = re.sub(r'\033\[[0-9;]*m', '', full_log)
                 self.log_buffer.append(clean_text)
-
+                self._append_to_disk(clean_text)
     # ==========================================
     # STAGE 1 roles: user -- harness -- LLM -- system
     # ==========================================
@@ -103,7 +108,7 @@ class AgentLogger:
     # ==========================================
 
     def log_planner_to_executor(self, task: str):
-        self.audit("PLANNER", "EXECUTOR", "Task Directive", task, color=self.C_PLANNER)
+        self.audit("PLANNER", "EXECUTOR", "Task information", task, color=self.C_PLANNER)
     
     def log_executor_to_planner(self, result: str):
         self.audit("EXECUTOR", "PLANNER", "Execution Result", result, color=self.C_EXECUTOR)
@@ -112,11 +117,10 @@ class AgentLogger:
         self.audit("PLANNER", "HARNESS", "Directive", directive, color=self.C_PLANNER)
     
     def log_harness_to_planner(self, response: str):
-        self.audit("HARNESS", "PLANNER", "Execution Feedback", response, color=self.C_HARNESS)
+        self.audit("HARNESS", "PLANNER (waiting for LLM response)", "Message", response, color=self.C_HARNESS)
     
-    def log_harness_to_executor(self, tool_name: str, args: str):
-        content = f"Requesting execution of Tool: {tool_name}\nWith Arguments: {args}"
-        self.audit("HARNESS", "EXECUTOR", "Execution Request", content, color=self.C_HARNESS)
+    def log_harness_to_executor(self, args: str):
+        self.audit("HARNESS", "EXECUTOR", "Execution Request", args, color=self.C_HARNESS)
 
     def log_executor_to_harness(self, observation: str):
         self.audit("EXECUTOR", "HARNESS", "Execution Observation", observation, color=self.C_EXECUTOR)

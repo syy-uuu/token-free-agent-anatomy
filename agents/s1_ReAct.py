@@ -7,13 +7,7 @@ from static_tools import STATIC_SCHEMAS, STATIC_HANDLERS
 
 client = config.client
 MODEL = config.model
-SYSTEM = (
-    f"You are a hardcore token-free coding agent at {config.workdir}. Use tools to solve tasks.\n"
-    f"CRITICAL RULES:\n"
-    f"1. ACT, DO NOT EXPLAIN. Never just type code blocks in text (content). You must physically write files using 'write_file' and physically execute commands using 'bash'.\n"
-    f"2. CLI ENTRYPOINT REQUIREMENT: Any Python script you write MUST contain a proper '__main__' block or executing logic that explicitly prints (sys.stdout) the results to the terminal, otherwise bash will return no output.\n"
-    f"3. BUG LOOP PREVENTION: If your bash command returns no output or unexpected results, do not repeat the same command. You must check the file content, rewrite the script to add print statements or debugging info, and re-run."
-)
+
 
 
 def agent_loop(state: list, logger):
@@ -45,8 +39,9 @@ def agent_loop(state: list, logger):
         
         logger.log_llm_to_harness(raw_brain_output)
 
-        # 4. LLM ➔ USER / HARNESS ➔ SYSTEM 决策点
+        # 4. LLM ➔ USER / HARNESS ➔ SYSTEM
         if message.content and not message.tool_calls:
+            # 6. HARNESS ➔ USER
             logger.log_harness_to_user(message.content)
 
             if turn_counter == 1:
@@ -79,4 +74,7 @@ def agent_loop(state: list, logger):
                 "content": result
             })
             continue
-        break  
+        final_output = message.content if message.content else ""
+        break
+    return final_output   
+    

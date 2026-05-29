@@ -1,4 +1,0 @@
-
-[09:21:10] 🔗 [EVENT #1] : USER ➔ HARNESS
-Create a new directory named 'math_engine'. Inside it, initialize an '__init__.py' file, then create a core utility module named 'calculator.py' with advanced division and multiplication operations that gracefully handles ZeroDivisionError. Finally, write a 'test_calculator.py' file inside the same directory to verify it using pytest.
-————————————————————————————————————————————————————————————
