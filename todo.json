@@ -1,42 +1,22 @@
 [
   {
     "id": 1,
-    "task": "Recreate directory structure for math_engine",
-    "status": "failed"
+    "task": "Create directory project_v1",
+    "status": "pending"
   },
   {
     "id": 2,
-    "task": "Initialize empty __init__.py file in math_engine",
-    "status": "failed"
+    "task": "Search for all .py files in current folder",
+    "status": "pending"
   },
   {
     "id": 3,
-    "task": "Create subdirectory calculator inside math_engine",
-    "status": "failed"
+    "task": "Initialize an empty report.txt file inside project_v1",
+    "status": "pending"
   },
   {
     "id": 4,
-    "task": "Initialize empty __init__.py file in math_engine/calculator",
-    "status": "failed"
-  },
-  {
-    "id": 5,
-    "task": "Write advanced division function in math_engine/calculator.py",
-    "status": "failed"
-  },
-  {
-    "id": 6,
-    "task": "Write advanced multiplication function in math_engine/calculator.py",
-    "status": "pending"
-  },
-  {
-    "id": 7,
-    "task": "Handle ZeroDivisionError in math_engine/calculator.py",
-    "status": "pending"
-  },
-  {
-    "id": 8,
-    "task": "Create test_calculator.py inside the test/stage2/ folder to verify calculator module",
+    "task": "Write the list of found .py files into project_v1/report.txt",
     "status": "pending"
   }
 ]

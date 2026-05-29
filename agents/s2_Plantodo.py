@@ -1,13 +1,11 @@
 import json
 import os
-from utils.logger import AgentLogger
 from utils.config import config
-from static_tools import STATIC_SCHEMAS, STATIC_HANDLERS
+from agents.s1_ReAct import agent_loop
 
 # Initialize global configuration and logger micro-scope
 client = config.client
 MODEL = config.model
-logger = AgentLogger()
 
 # =====================================================================
 # 🧠 DISSECTING ROLE 1: THE PLANNER (System Architect & Task Allocator)
@@ -31,35 +29,32 @@ Your sole mission is to split a user's complex macro goal into a sequence of sma
 """
 
 class LocalPlannerAgent:
-    def __init__(self):
+    def __init__(self, logger):
         self.system_prompt = PLANNER_SYSTEM_PROMPT
+        self.logger = logger  # 依赖注入
 
     def generate_initial_plan(self, user_goal: str) -> list:
-        """Analyze the macro user goal and output the first-generation task graph."""
-        logger.log_orchestrator_info(f"🔮 [Planner] Dissecting strategic user goal: '{user_goal}'...")
+        self.logger.log_harness_to_planner(f"Dissecting user goal: '{user_goal}'")
         
         messages = [
             {"role": "system", "content": self.system_prompt},
-            {"role": "user", "content": f"Generate a strict JSON task checklist for the following macro goal:\n{user_goal}"}
+            {"role": "user", "content": f"Generate a JSON task list for: {user_goal}"}
         ]
         
-        # Enforce strict JSON Mode supported by OpenAI / Ollama standard protocols
-        response = client.chat.completions.create(
-            model=MODEL,
-            messages=messages,
-            response_format={"type": "json_object"}, 
-            temperature=0.1
-        )
+        # [统计] 交互 Message count: 2
+        response = client.chat.completions.create(model=MODEL, messages=messages, response_format={"type": "json_object"})
         
-        plan_raw = response.choices[0].message.content
-        parsed_data = json.loads(plan_raw)
+        plan_data = json.loads(response.choices[0].message.content)
+        todo_list = plan_data.get("tasks", plan_data)
         
-        # Handle cases where model wraps the array inside a top-level "tasks" key
-        return parsed_data.get("tasks", parsed_data)
+        # 记录：Planner 告知 Harness 计划生成完毕
+        self.logger.log_harness_to_user(f"Generated {len(todo_list)} tasks.")
+        return todo_list
+
 
     def replan_on_failure(self, current_todo: list, failed_step_id: int, error_log: str) -> list:
         """[SELF-HEALING MECHANISM] Re-route and re-compile remaining plans upon front-line execution failure."""
-        logger.log_orchestrator_warning(f"🚨 [Planner] Front-line report: Task ID {failed_step_id} failed completely. Initiating dynamic replanning...")
+        self.logger.log_harness_to_planner(f"CRASH: Step {failed_step_id} failed. Error: {error_log}")
         
         context_prompt = f"""The current execution snapshot of the task graph is:
                                 {json.dumps(current_todo, ensure_ascii=False, indent=2)}
@@ -99,95 +94,61 @@ Your sole mission is to complete the given micro-task by any means necessary, us
 """
 
 class LocalExecutorAgent:
-    def __init__(self):
+    def __init__(self, logger):
         self.system_prompt = EXECUTOR_SYSTEM_PROMPT
-        self.max_react_steps = 5  # Deadlock prevention guardian inside the inner loop
+        self.logger = logger
+        self.max_react_steps = 5  
 
-    def execute_single_task(self, task_description: str) -> tuple[bool, str]:
-        """Inner Loop: Granular ReAct runtime loop with local self-healing capability."""
-        logger.log_orchestrator_info(f"🏃 [Executor] Processing isolated task directive: '{task_description}'")
-        
-        # [MANDATE s06] Cold-start memory reset: context is 100% clean of prior tasks' noise
-        messages = [
-            {"role": "system", "content": self.system_prompt},
-            {"role": "user", "content": f"Execute and fulfill this exact micro-task now: {task_description}"}
-        ]
+    def execute_single_task(self, task: str) -> tuple[bool, str]:
+        self.logger.log_planner_to_executor(f"Start micro-task: {task}")
         
         step_count = 0
-        last_observation = ""
-        
         while step_count < self.max_react_steps:
             step_count += 1
-            logger.log_executor_round(f"Executor ReAct Round [{step_count}/{self.max_react_steps}]")
+            # 记录：Executor ➔ Harness (物理操作)
+            self.logger.log_executor_to_harness(f"Round {step_count}: Requesting tool use for {task}")
             
-            # -----------------------------------------------------------------
-            # 🔌 TO BE FILLED: WIRE UP YOUR STAGE 1 LOGIC HERE
-            # -----------------------------------------------------------------
-            # 1. Feed `messages` to client.chat.completions.create with STATIC_SCHEMAS.
-            # 2. Extract model's text/tool_calls. Append model's response to `messages`.
-            # 3. If it's a tool_call, dispatch via STATIC_HANDLERS, get `observation`.
-            # 4. Append `observation` back to `messages` as a 'tool' role.
-            # 5. Local Self-Healing: If a tool errors out, let the model read the error stack and try fixing it.
-            # 6. Success Condition: When model outputs final answer text declaring completion, return True, "Fulfillment Message".
-            # -----------------------------------------------------------------
-            
-            # TEMPORARY PLACEHOLDER FOR INITIAL TEST RUNS:
-            pass
+            try:
+                # 假设这里是你的执行逻辑
+                observation = agent_loop(task,logger=self.logger)  
+                # 记录：Harness ➔ Executor (物理观测)
+                self.logger.log_harness_to_executor(f"Round {step_count}: Observation: {observation}")
+                
+                if "success" in observation.lower():
+                    self.logger.log_executor_to_planner("Task succeeded.")
+                    return True, observation
+            except Exception as e:
+                self.logger.log_harness_to_executor(f"Error: {str(e)}")
         
-        # If execution hits max steps without a clean exit, treat as an environmental crash
-        return False, f"Executor failed after reaching max {self.max_react_steps} steps. Last known feedback: {last_observation or 'Timeout'}"
+        return False, "Max steps reached."
 
 
 # =====================================================================
 # ⚙️ THE CONTROL HUB: DUAL-LOOP STATE MACHINE (Orchestrator Core)
 # =====================================================================
 
-def run_orchestrator(user_goal: str):
-    planner = LocalPlannerAgent()
-    executor = LocalExecutorAgent()
+def run_orchestrator(user_goal: str, logger):
+    planner = LocalPlannerAgent(logger)
+    executor = LocalExecutorAgent(logger)
     
-    # 1. Macro strategic planning phase
-    todo_list = planner.generate_initial_plan(user_goal)
-    
-    # [MANDATE s12] State persistence
-    with open("todo.json", "w", encoding="utf-8") as f:
-        json.dump(todo_list, f, ensure_ascii=False, indent=2)
-        
-    # Using our new strict English logger methods!
-    logger.log_orchestrator_success(f"Task graph successfully deployed to local file memory: todo.json")
+    # 交互统计
+    total_interaction_messages = 0
 
-    # 2. Outer Loop: Finite State Machine Scheduler
+    # 1. 初始规划
+    todo_list = planner.generate_initial_plan(user_goal)
+    total_interaction_messages += 2 # (Planner <-> Harness)
+
+    # 2. Outer Loop
     while True:
-        current_step = None
-        for step in todo_list:
-            if step["status"] == "pending":
-                current_step = step
-                break
-                
-        if not current_step:
-            logger.log_orchestrator_success("Task board fully cleared! All micro-steps successfully delivered!")
-            break
+        current_step = next((s for s in todo_list if s["status"] == "pending"), None)
+        if not current_step: break
             
-        current_step["status"] = "running"
-        logger.log_orchestrator_info(f"Dispatching Step ID {current_step['id']} -> [Task: {current_step['task']}]")
+        # [仪表盘展示]
+        print(f"\n⚡ CURRENT STATUS: Steps Done | Total Interactions: {total_interaction_messages}")
         
-        # 3. Inner Loop execution activation with strict memory isolation
         success, final_observation = executor.execute_single_task(current_step["task"])
+        total_interaction_messages += 4 # (P->E, E->H, H->E, E->P) 每一轮交互更新
         
-        if success:
-            current_step["status"] = "completed"
-            logger.log_orchestrator_info(f"Step ID {current_step['id']} completed successfully.")
-        else:
-            # 4. [SYSTEM-LEVEL SELF-HEALING] Front-line failed.
-            current_step["status"] = "failed"
-            logger.log_orchestrator_warning(
-                f"Step ID {current_step['id']} crashed unrecoverably. Activating system self-healing dynamic re-routing..."
-            )
-            
-            # Re-compile remaining plans
+        if not success:
             todo_list = planner.replan_on_failure(todo_list, current_step["id"], final_observation)
-            
-            with open("todo.json", "w", encoding="utf-8") as f:
-                json.dump(todo_list, f, ensure_ascii=False, indent=2)
-                
-            logger.log_orchestrator_info("Task graph updated and persistence files re-synced. Restarting scheduler...")
+            total_interaction_messages += 2

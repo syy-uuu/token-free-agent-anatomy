@@ -40,7 +40,7 @@ def main():
         history = []
         while True:
             try:
-                prompt = f"{AgentLogger.COLOR_QUERY}Enter query (Press Enter twice to send, 'q' to quit):\n {AgentLogger.COLOR_RESET}"
+                prompt = f"{AgentLogger.C_USER}Enter query (Press Enter twice to send, 'q' to quit):\n {AgentLogger.C_RESET}"
                 query = get_multiline_input(prompt)
             except (EOFError, KeyboardInterrupt):
                 break
@@ -70,7 +70,7 @@ def main():
         from agents.s2_Plantodo import run_orchestrator
         
         try:
-            prompt = f"{AgentLogger.COLOR_QUERY}Enter your complex macro-level goal (Press Enter twice to send, 'q' to quit):\n {AgentLogger.COLOR_RESET}"
+            prompt = f"{AgentLogger.C_USER}Enter your complex macro-level goal (Press Enter twice to send, 'q' to quit):\n {AgentLogger.C_RESET}"
             user_goal = get_multiline_input(prompt)
         except (EOFError, KeyboardInterrupt):
             return
@@ -82,7 +82,7 @@ def main():
         logger.log_user_to_harness(user_goal)
         
         # Trigger the Dual-Loop execution (Planner -> todo.json -> Executor ReAct)
-        run_orchestrator(user_goal)
+        run_orchestrator(user_goal, logger)
         print()
         
         # Save the full execution transcript if specified

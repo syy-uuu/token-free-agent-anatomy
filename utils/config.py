@@ -11,7 +11,7 @@ class Config:
         # Base settings
         self.base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
         self.api_key = os.getenv("OLLAMA_API_KEY", "ollama")
-        self.model = os.getenv("DEFAULT_MODEL", "qwen2.5:latest")
+        self.model = os.getenv("DEFAULT_MODEL", "qwen2.5-coder:latest")
         
         # Pre-configured OpenAI client
         self.client = OpenAI(

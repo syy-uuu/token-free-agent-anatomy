@@ -16,7 +16,7 @@ SYSTEM = (
 )
 
 
-def agent_loop(state: list, logger: AgentLogger):
+def agent_loop(state: list, logger):
     turn_counter = 0
     while True:
         turn_counter += 1

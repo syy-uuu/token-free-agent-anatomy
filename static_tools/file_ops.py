@@ -39,7 +39,7 @@ FILE_TOOLS_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "edit_file",
-            "description": "Replace a specific block of text in a file with new text (Search & Replace).",
+            "description": "CRITICAL: MUST use this tool for existing files to modify specific parts. NEVER use write_file to overwrite an entire file if you only need to change a few lines. Always read the file first to get the exact text block for matching.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -63,10 +63,14 @@ def run_read(path: str) -> str:
     except Exception as e:
         return f"Error reading file: {str(e)}"
 
-def run_write(path: str, content: str) -> str:
+def run_write(path: str, content: str, mode: str = "overwrite") -> str:
     """Write content to a file, creating directories if needed."""
+
+    full_path = safe_path(path)
+    if mode == "create" and full_path.exists():
+        return f"Error: File '{path}' already exists. Use 'edit_file' to modify it or 'overwrite' mode to replace."
+
     try:
-        full_path = safe_path(path)
         full_path.parent.mkdir(parents=True, exist_ok=True)
         full_path.write_text(content, encoding="utf-8")
         return f"Success: File '{path}' written successfully."
