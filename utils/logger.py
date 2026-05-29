@@ -60,10 +60,6 @@ class AgentLogger():
                 f.write(content + "\n")
 
     def audit(self, source: str, target: str, payload_type: str, content: str, result: str = None, color: str = None):
-            """
-            [核心审计协议]
-            强制规范：所有交互必须经过此管道，确保 Event ID, 角色, 类型, 内容, 结果对齐。
-            """
             self.event_count += 1
             self.step_count += 1
             
@@ -103,7 +99,7 @@ class AgentLogger():
     def log_harness_to_llm(self, messages: list):
         total_messages = len(messages) if isinstance(messages, list) else 1
         summary = f"{total_messages} messages, latest: '{messages[-1].get('content', '')}'" if isinstance(messages, list) else str(messages)
-        self.audit("HARNESS", "LLM", "Message History", summary, color=self.C_HARNESS)
+        self.audit("HARNESS", "LLM (waiting for response)", "Message History", summary, color=self.C_HARNESS)
 
     def log_llm_to_harness(self, raw_output: str):
         self.audit("LLM", "HARNESS", "Raw Output", raw_output, color=self.C_PLANNER)

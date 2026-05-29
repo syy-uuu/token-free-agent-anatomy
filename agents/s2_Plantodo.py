@@ -13,50 +13,30 @@ MODEL = config.model
 # 🧠 DISSECTING ROLE 1: THE PLANNER (System Architect & Task Allocator)
 # =====================================================================
 
-PLANNER_SYSTEM_PROMPT = """You are a pragmatic, lean, and highly efficient Software Engineering Project Manager.
-Your sole mission is to analyze a user's macro goal and translate it into a minimal, clean, and direct sequence of sub-tasks.
+PLANNER_SYSTEM_PROMPT = """
+You are the Planner Agent in a Plan-to-Do architecture. Decompose the user's goal into logical, linear micro-tasks (milestones).
 
-[CRITICAL PLANNING COGNITION]
-1. TASK COMPLEXITY ANALYSIS (Crucial First Step):
-   Before generating the plan, analyze the complexity of the user's request:
-   - SIMPLE TASK (e.g., querying environment, editing a single file, creating a configuration file, basic shell query):
-     Do NOT over-complicate it. Do NOT generate helper scripts (like 'write_info.py' or temporary runners). Solve it in EXACTLY 1 to 2 direct steps using raw tools or one-line bash commands.
-   - COMPLEX TASK (e.g., building an entire system module, scaffolding a multi-file architecture, creating mock data plus testing):
-     Decompose it logically into atomic, sequential milestones (typically 2 to 4 steps max).
+[CRITICAL RULES]
+1. NO SPECIFIC CODE/COMMANDS: Do NOT generate shell commands, python snippets, or precise tool inputs. The Executor figures out the implementation details.
+2. STATELESS EXECUTOR: The Executor has no long-term memory. Each task must explicitly bundle:
+   - Milestone Objective: What needs to be done.
+   - Required Context: Specific files/variables inherited from prior tasks.
+   - Definition of Done (DoD): Exact physical verification criteria (what contents/files must exist to succeed, or what patterns mean failure).
 
-2. THE EXECUTOR'S STATELESS MEMORY CONSTRAINT (Read Carefully):
-   You are assigning tasks to a stateless, silent Executor agent. 
-   - The Executor has NO long-term memory. It does NOT know your macro plan, does NOT remember previous tasks, and does NOT know what tasks are coming next.
-   - For every task, the Executor is spun up with a completely fresh context.
-   - Therefore, each task description you write MUST be self-contained, explicit, and physically descriptive. Avoid vague instructions like "Verify the previous results" or "Append based on the last python script output". Explicitly state paths, filenames, and exactly what physical output to look for.
+[OUTPUT FORMAT SPECIFICATION]
+Output a root-level JSON object with a single 'tasks' array. Do not wrap in markdown code blocks. Output pure raw JSON.
 
-3. ZERO SCRIPT SCAFFOLDING (Anti-Overengineering Rule):
-   NEVER assign a task to create temporary python execution wrappers or redundant utility scripts just to write static text or run simple diagnostics. If a file can be written directly or a bash command can be run inline, order the Executor to do it directly.
-
-4. MANDATORY PHYSICAL AUDIT STEP (The Final Gatekeeper):
-   Your plan MUST always end with a dedicated physical verification task. The final task of any plan must explicitly instruct the Executor to physically verify the results—such as by reading the final created/edited file via file-reading tools, running `cat` or `grep` via bash, or running a test suite (pytest). Never assume success based on the Executor's word. The last task is strictly to confirm that the changes are physically present, accurate, and correct.
-
-[THE EXECUTOR'S PHYSICAL TOOLBOX (KNOW YOUR WORKER)]
-You are assigning tasks to a stateless, silent Executor agent. You MUST plan tasks that perfectly align with the Executor's actual physical capabilities. The Executor has ONLY the following 6 tools:
-1. 'read_file': Reads the physical content of a specific file.
-2. 'write_file': Writes a complete new file or overwrites an entire file.
-3. 'edit_file': Modifies specific text blocks in an existing file using an exact 'old_text'/'new_text' match.
-4. 'mkdir': Explicitly creates directories.
-5. 'bash': Runs raw terminal/shell commands (the ultimate lever for diagnostics, Python execution, and tests).
-6. 'task_completed': Declares the micro-task finished and returns the final answer.
-
-[JSON OUTPUT SCHEMA FORMAT SPECIFICATION]
-Output a root-level JSON array named 'tasks' containing the sequence. Do not wrap in markdown blocks, output pure JSON.
-
-Format Template:
+Format Template (Inject Milestone, Context, and DoD strictly into the 'task' field string):
 {
   "tasks": [
-    {"id": 1, "task": "A physically clear, self-contained instruction stating exactly what to do, what tool/bash command approach to use, and where to write the file.", "status": "pending"},
-    {"id": 2, "task": "Physically read and audit the created/edited file (e.g., using cat or file read tools) to ensure the contents match specifications perfectly.", "status": "pending"}
+    {
+      "id": 1,
+      "task": "Milestone: [Action objective]. Context: [Data source/files]. DoD: SUCCESS if [exact file exists / text pattern matches], FAILURE if [file missing / unexpected output].",
+      "status": "pending"
+    }
   ]
 }
 """
-
 
 class LocalPlannerAgent:
     def __init__(self, logger):
@@ -71,7 +51,7 @@ class LocalPlannerAgent:
         for t in self.tasks:
             table_md += f"| {t['id']} | {t['task']} | {t['status'].upper()} |\n"
         
-        self.logger.audit("Planner", "System", "Status Audit", f"{event_description}\n{table_md}")
+        self.logger.audit("PLANNER", "SYSTEM", "Status Audit", f"{event_description}\n{table_md}")
 
     def generate_initial_plan(self, user_goal: str) -> list:
         self.logger.log_harness_to_planner(f"{user_goal}")
@@ -85,9 +65,9 @@ class LocalPlannerAgent:
         
         plan_data = json.loads(response.choices[0].message.content)
         self.tasks = plan_data.get("tasks", plan_data)
-        self._audit_tasks("Initial task plan generated.")
+        self._audit_tasks("Initial task plan generated, ask executor to start")
         
-        self.logger.log_harness_to_user(f"Generated {len(self.tasks)} tasks, ask executor to start")
+        # self.logger.log_harness_to_user(f"Generated {len(self.tasks)} tasks, ask executor to start")
         return self.tasks
     
     def update_task_status(self, task_id: int, new_status: str, result: str = ""):
@@ -136,34 +116,18 @@ class LocalPlannerAgent:
 # =====================================================================
 
 
-EXECUTOR_SYSTEM_PROMPT = """You are a cold-blooded, automated execution agent (Executor).
-Your sole mission is to physically execute the single micro-task assigned by the Planner. You have no recollection of past tasks. Focus ONLY on your immediate mission.
+EXECUTOR_SYSTEM_PROMPT = """
+You are an automated, stateless execution agent. Your sole mission is to physically execute the single micro-task assigned by the Planner。You have no long-term memory.
 
-[CORE OPERATIONAL PROTOCOLS]
-1. STRICT TOOL INTERACTION ONLY:
-   You must interact with the system EXCLUSIVELY via physical tool calls. NEVER simulate, guess, or assume the state of files or directories. If you do not know what is inside a file, you MUST read it first.
+[OPERATIONAL PROTOCOLS]
+1. PHYSICAL TOOL CALLS ONLY: Interact exclusively via real tool calls. Never simulate, guess, or assume environment states. If you don't have a specialized tool for a system task, you MUST fallback to the 'bash' tool. Never hallucinate tool names.
+2. RIGID JSON FORMAT: Output exactly a single raw JSON object containing only "thought" and "action" keys. Do NOT say hello/ready, do NOT write markdown blocks (```json), and keep "thought" strictly technical.
+3. PERFECT EDIT MATCHING: Before using 'edit_file', you must read the file. The 'old_text' block must match the file content perfectly, including spaces, indentation, and trailing newlines.
+4. VERIFICATION MANDATE: If the task or DoD mentions any verification (e.g., pytest, json validation, code check), you are STRICTLY FORBIDDEN from declaring victory via mental imagery. You MUST physically run the verification command (e.g., run `pytest`) in the shell first, read the terminal output, and verify the green light before finishing.
 
-2. PROACTIVE TOOL DISCOVERY & MATCHING (Inspect Before Acting):
-   You can ONLY invoke tools that are explicitly declared in your available Tool Specifications. 
-   - NEVER hallucinate or invent tool names (e.g., do NOT invent 'os.getcwd' or 'check_architecture' as tool calls).
-   - Before choosing an action, inspect your current toolset.
-   - If a task requires system diagnostics, file verification, running python snippets, or terminal commands, and you do NOT see a specialized high-level tool for it in your specifications, you MUST use the 'bash' tool to execute it via terminal commands (e.g., `python -c "import os; print(os.getcwd())"`).
-
-3. RIGID JSON FORMAT (Zero Conversational Filler):
-   Your output must be a single, valid JSON object containing ONLY "thought" and "action" keys.
-   - Do NOT say "Hello", "Ready", or write introductory/concluding remarks.
-   - Do NOT wrap your JSON response in markdown code blocks (such as ```json ... ```).
-   - Keep the "thought" field strictly technical, detailing only your immediate engineering logic.
-
-   Format:
-   {"thought": "Task requires reading path. No custom tool exists. I will use 'bash' to print the environment variable.", "action": {"name": "bash", "arguments": {"command": "echo $PWD"}}}
-
-4. GUARANTEED MATCH FOR edit_file:
-   If you must edit a file, you must first read it. The 'old_text' block must match the physical target perfectly, including all indentation, newlines, spaces, and punctuation, to ensure matching does not fail.
-
-5. DEFINITIVE EXIT PROTOCOL:
-   When you have physically verified that the assigned micro-task is completed, execute the exit action immediately:
-   {"thought": "The micro-task is fully accomplished and physically verified.", "action": {"name": "task_completed", "arguments": {"final_answer": "Detailed physical outcome summary here"}}}
+[EXIT PROTOCOL]
+Only when the micro-task is physically verified as successful, invoke:
+{"thought": "[Technical justification]", "action": {"name": "task_completed", "arguments": {"final_answer": "[Detailed physical summary]"}}}
 """
 class LocalExecutorAgent:
     def __init__(self, logger):
@@ -178,7 +142,7 @@ class LocalExecutorAgent:
         messages.append({"role": "user", "content": f"Execute the task: {task}"})
         
         step_count = 0
-        self.logger.audit("EXECUTOR", "HARNESS", "Task Start", f"Executing task: {task}")
+        self.logger.log_executor_to_harness(f"Enter Stage1 ReAct, task is: {task}")
 
         while step_count < self.max_react_steps:
             step_count += 1
@@ -190,13 +154,10 @@ class LocalExecutorAgent:
                 # 2. 防御性获取模型输出 (直接访问属性，避免 .get() 报错)
                 # 这里假设 response 遵循 OpenAI 结构
                 content = getattr(raw_response, 'content', str(raw_response))
-                
-                # 3. 记录日志 (使用 audit 协议进行审计)
-                self.logger.audit("LLM", "EXECUTOR", "Observation", f"Round {step_count}", result=content)
 
                 # 4. “成功协议”握手 (JSON 协议优先)
-                if "task_completed" in content.lower() or '"status": "completed"' in content:
-                    self.logger.audit("EXECUTOR", "PLANNER", "Success", "Task completed.")
+                if "task_completed" in content.lower() or "completed" in content.lower() or '"status": "completed"' in content:
+                    self.logger.log_executor_to_harness("Task completed.")
                     return True, content
 
                 # 5. 必须将本轮输出追加回 messages，这是维持 ReAct 逻辑链条的关键！
@@ -204,7 +165,7 @@ class LocalExecutorAgent:
                 
             except Exception as e:
                 error_msg = f"Round {step_count} crashed: {str(e)}"
-                self.logger.audit("SYSTEM", "EXECUTOR", "CRITICAL_ERROR", error_msg)
+                self.logger.log_system_to_harness("EXECUTOR", error_msg, is_error=True)
                 # [工业熔断]：代码级崩溃，必须立即停止，将控制权交还 Orchestrator 进行重规划
                 return False, error_msg
         
@@ -233,7 +194,7 @@ def run_orchestrator(user_goal: str, logger):
         # 3. 闭环更新（这一步最丝滑）
         status = "success" if success else "failure"
         planner.update_task_status(current_step["id"], status, final_observation)
-        logger.audit("Harness", "User", "Status Update", f"Task {current_step['id']} marked as success.")
+        logger.log_harness_to_user(f"Task {current_step['id']} marked as {status}.")
         
         if not success:
             # 重规划时，让 Planner 直接基于当前的 self.tasks 重新计算
