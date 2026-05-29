@@ -1,4 +1,0 @@
-./test_calculator.py
-./calculator.py
-./math_engine/test/test_calculator.py
-./math_engine/calculator.py

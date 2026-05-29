@@ -1,5 +1,7 @@
 import time
 import re
+import json
+from pathlib import Path
 
 class AgentLogger():
     # 身份色彩协议定义 (Identity Color Protocol)
@@ -14,13 +16,23 @@ class AgentLogger():
         "USER": C_USER, "PLANNER": C_PLANNER, "EXECUTOR": C_EXECUTOR,
         "HARNESS": C_HARNESS, "SYSTEM": C_SYSTEM
     }
-
-    def __init__(self, save_log: bool = False):
+    
+    def __init__(self, save_log: bool = False, stage_name: str = "", base_log_dir: str = "logger_history"):
         self.save_log = save_log
+        self.stage_name = stage_name
+        self.base_log_dir = base_log_dir
+        self.log_file_path = self._prepare_log_path()
         self.log_buffer = []    
         self.message_history = [] 
         self.event_count = 0  
         self.step_count = 0
+
+    def _prepare_log_path(self):
+        log_dir = Path(self.base_log_dir) / self.stage_name
+        log_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = time.strftime("%Y-%m-%d_%H-%M", time.localtime())
+        file_path = log_dir / f"{timestamp}.log"
+        return file_path
 
     def _get_timestamp(self):
         return time.strftime("%H:%M:%S", time.localtime())
@@ -77,6 +89,8 @@ class AgentLogger():
                 clean_text = re.sub(r'\033\[[0-9;]*m', '', full_log)
                 self.log_buffer.append(clean_text)
                 self._append_to_disk(clean_text)
+
+
     # ==========================================
     # STAGE 1 roles: user -- harness -- LLM -- system
     # ==========================================
@@ -126,12 +140,11 @@ class AgentLogger():
         self.audit("EXECUTOR", "HARNESS", "Execution Observation", observation, color=self.C_EXECUTOR)
 
 
-
-    # ==========================================
-    # 磁盘归档
-    # ==========================================
-    def flush_to_disk(self, file_name="sample_log.txt"):
-        if self.save_log and self.log_buffer:
-            with open(file_name, "w", encoding="utf-8") as f:
-                f.write("\n".join(self.log_buffer))
-            print(f"\n💾 [SYSTEM INFO]: logger saved to: {file_name}")
+    # # ==========================================
+    # # 磁盘归档
+    # # ==========================================
+    # def flush_to_disk(self, file_name="sample_log.txt"):
+    #     if self.save_log and self.log_buffer:
+    #         with open(file_name, "w", encoding="utf-8") as f:
+    #             f.write("\n".join(self.log_buffer))
+    #         print(f"\n💾 [SYSTEM INFO]: logger saved to: {file_name}")

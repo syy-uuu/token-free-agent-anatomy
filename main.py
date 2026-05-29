@@ -23,7 +23,7 @@ def main():
     # True to save logs to disk, False to only print in terminal.
     SHOULD_SAVE = True  
     
-    logger = AgentLogger(save_log=SHOULD_SAVE)
+
     
     print("select agent:")
     print(" [1] Stage 1: Standard ReAct Loop)")
@@ -34,6 +34,7 @@ def main():
     choice = input("请输入编号 [1/2/q]: ").strip()
     
     if choice == '1':
+        logger = AgentLogger(save_log=SHOULD_SAVE, stage_name="stage1")
         config.set_stage_workdir("stage1")
         print("\n🚀  in processing: Stage 1 ReAct ...\n")
         from agents.s1_ReAct import agent_loop
@@ -65,6 +66,7 @@ def main():
 
             
     elif choice == '2':
+        logger = AgentLogger(save_log=SHOULD_SAVE, stage_name="stage2")
         config.set_stage_workdir("stage2")
         print("\n🚀  in processing: Stage 2 Plan to Do...\n")
         
