@@ -1,2 +1,0 @@
-Current Working Directory: /Users/elaine/repository/token-free-agent-anatomy/test/stage1
-System Architecture: Darwin 25.5.0 (arm64)

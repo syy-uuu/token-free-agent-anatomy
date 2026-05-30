@@ -60,8 +60,8 @@ def main():
                 break
                 
             #1. USER ➔ HARNESS
-            logger.log_user_to_harness(query)
-            history.append({"role": "user", "content": query})
+            logger.log_user_to("HARNESS ➔ LLM", "Message", user_goal)
+            history.append({"role": "user", "content": user_goal})
             agent_loop(history, logger)
             print()
 
@@ -82,9 +82,6 @@ def main():
             
         if user_goal.strip().lower() in ("q", "exit", ""):
             return
-            
-        # 1. Capture the macro-intent and route it to the Orchestrator
-        logger.log_user_to_harness(user_goal)
         
         # Trigger the Dual-Loop execution (Planner -> todo.json -> Executor ReAct)
         run_orchestrator(user_goal, logger)

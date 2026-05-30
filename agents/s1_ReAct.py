@@ -46,13 +46,16 @@ def clean_and_parse_json_line(line: str):
 
 def agent_loop(state: list, logger):
     turn_counter = 0
-    max_turns = 30  # 防御硬极限中断
+    max_turns = 30  
     
     while turn_counter < max_turns:
         turn_counter += 1
+
+        if turn_counter > 1:
+            logger.log_harness_to_llm(f"Stage1 ReAct agent, turn count {turn_counter}", "Current state", state)
         
         # 1. HARNESS ➔ LLM
-        logger.log_harness_to_llm(state)
+        # logger.log_harness_to("LLM", "Message", state)
         
         current_tool_choice = "required" if turn_counter == 1 else "auto"
         
@@ -64,11 +67,11 @@ def agent_loop(state: list, logger):
                 tool_choice=current_tool_choice
             )
         except Exception as ce:
-            print(f"\n[TIMEOUT/ERROR] API Request failed: {str(ce)}\n")
+            logger.log_info("error", f"\n[TIMEOUT/ERROR] API Request failed: {str(ce)}\n")
             return f"Harness Interrupt: API Call Failed ({str(ce)})"
 
         message = response.choices[0].message
-        print(f"\n[Step {turn_counter}] [Debug] LLM Response: {message}\n")
+        # print(f"\n[Step {turn_counter}] [Debug] LLM Response: {message}\n")
         
         actions_to_execute = []
         raw_brain_output = ""
@@ -78,6 +81,7 @@ def agent_loop(state: list, logger):
         # 轨 A：处理标准 tool_calls
         if message.tool_calls:
             for tc in message.tool_calls:
+                logger.log_info("debug","Standerd tool call detected")
                 raw_brain_output += f"[Standard Tool Call]: {tc.function.name}({tc.function.arguments})\n"
                 try:
                     args_dict = json.loads(tc.function.arguments) if isinstance(tc.function.arguments, str) else tc.function.arguments
@@ -114,7 +118,7 @@ def agent_loop(state: list, logger):
                                     a_args = json.loads(a_args)
                                 except Exception:
                                     pass
-                            
+                            logger.log_info("debug","Extracted JSON tool call detected")
                             raw_brain_output += f"[Extracted JSON Tool]: {a_name}({json.dumps(a_args)})\n"
                             actions_to_execute.append({
                                 "id": f"call_extracted_{turn_counter}_{line_idx}",
@@ -148,7 +152,7 @@ def agent_loop(state: list, logger):
         # 情况 1：无有效工具，属于正常自然语言结束或开场白
         if not actions_to_execute:
             if message.content:
-                logger.log_harness_to_user(message.content)
+                logger.log_harness_to("USER", "Message", message.content)
                 
                 if turn_counter == 1:
                     state.append({"role": "user", "content": "Please proceed with the tool executions now."})
@@ -164,7 +168,7 @@ def agent_loop(state: list, logger):
             t_args = action["arguments"]
             
             # 4-1. HARNESS ➔ SYSTEM 广播
-            logger.log_harness_to_system(tool_name=t_name, args=json.dumps(t_args, ensure_ascii=False))
+            logger.log_harness_to_system(tool_name=t_name, args=t_args)
             
             is_error = False
             try:
@@ -193,7 +197,7 @@ def agent_loop(state: list, logger):
         continue
 
     else:
-        print(f"\n[SYSTEM CRASH] Error: Max steps ({max_turns}) reached. Safety circuit breaker triggered.")
-        final_output = "Error: Max steps reached. Process terminated by Harness Guard."
-        
+        final_output = f"Error: Max steps ({max_turns}) reached. Process terminated by Harness Guard."
+        logger.log_info("error", final_output)
+    # logger.log_info("Stage1 ReAct agent exit", message.content if message.content else "no message in this round")
     return final_output

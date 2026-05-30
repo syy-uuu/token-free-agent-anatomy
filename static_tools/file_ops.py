@@ -34,22 +34,31 @@ FILE_TOOLS_SCHEMAS = [
             }
         }
     },
-    {
-        "type": "function",
-        "function": {
-            "name": "edit_file",
-            "description": "CRITICAL: MUST use this tool for existing files to modify specific parts. NEVER use write_file to overwrite an entire file if you only need to change a few lines. Always read the file first to get the exact text block for matching.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "Relative path to the file."},
-                    "old_text": {"type": "string", "description": "The exact text block to find."},
-                    "new_text": {"type": "string", "description": "The text block to replace it with."}
+{
+    "type": "function",
+    "function": {
+        "name": "edit_file",
+        "description": "CRITICAL: Surgical precision edit ONLY. Modifies a specific local block of text within an existing file. DO NOT provide the entire file content in 'old_text' or 'new_text'. Only provide the exact 3-5 lines that need to change plus minimal surrounding context. For multiple changes, call this tool multiple times sequentially.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string", 
+                    "description": "Relative path to the file."
                 },
-                "required": ["path", "old_text", "new_text"]
-            }
+                "old_text": {
+                    "type": "string", 
+                    "description": "The exact existing text block to find. Must be copied verbatim from the file, including identical indentation, spaces, and newlines. Typically 1-5 lines."
+                },
+                "new_text": {
+                    "type": "string", 
+                    "description": "The new text block to replace 'old_text' with. Keep it minimal and focused only on the fix."
+                }
+            },
+            "required": ["path", "old_text", "new_text"]
         }
-    },
+    }
+},
     {
     "type": "function",
     "function": {
@@ -94,19 +103,44 @@ def run_write(path: str, content: str, mode: str = "overwrite") -> str:
         return f"Error writing file: {str(e)}"
 
 def run_edit(path: str, old_text: str, new_text: str) -> str:
-    """Standard search and replace edit logic."""
+    """Surgical search and replace edit logic with strict guardrails."""
     try:
         full_path = safe_path(path)
         if not full_path.exists():
             return f"Error: File '{path}' not found for editing."
         
+        # 1. 拦截空字符串或完全无意义的调用
+        if not old_text.strip():
+            return "Error: 'old_text' cannot be empty. You must specify the exact code block to replace."
+
         content = full_path.read_text(encoding="utf-8")
-        if old_text not in content:
-            return f"Error: Could not find the exact 'old_text' block in '{path}'. Edit failed."
         
-        new_content = content.replace(old_text, new_text)
+        # 2. 拦截行数过多的全量替换行为 (Hard Limit: 比如限制单次改动范围不超过30行)
+        old_lines_count = len(old_text.splitlines())
+        if old_lines_count > 30:
+            return (f"Error: Single edit block is too large ({old_lines_count} lines). "
+                    f"To prevent hallucination, you are prohibited from rewriting large blocks. "
+                    f"Please narrow down your 'old_text' to ONLY the specific 2-5 lines that need changes.")
+
+        # 3. 检查 old_text 是否存在
+        if old_text not in content:
+            return (f"Error: Could not find the exact 'old_text' block in '{path}'. "
+                    f"Please view the file again to check the exact indentation, spaces, and spelling. "
+                    f"Make sure you copied it verbatim.")
+        
+        # 4. 关键：防止多处误伤
+        match_count = content.count(old_text)
+        if match_count > 1:
+            return (f"Error: The 'old_text' block you provided was found {match_count} times in the file. "
+                    f"The system cannot safely determine which one to replace. "
+                    f"Please include 2-3 extra lines of surrounding code (before or after) in both 'old_text' and 'new_text' to make it unique.")
+        
+        # 5. 执行替换（指定 count=1 确保绝对安全）
+        new_content = content.replace(old_text, new_text, 1)
         full_path.write_text(new_content, encoding="utf-8")
-        return f"Success: File '{path}' updated."
+        
+        return f"Success: File '{path}' updated locally and precisely."
+        
     except Exception as e:
         return f"Error editing file: {str(e)}"
 

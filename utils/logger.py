@@ -9,12 +9,14 @@ class AgentLogger():
     C_PLANNER = '\033[93m'   # Bright Yellow (战略指挥)
     C_EXECUTOR = '\033[95m'  # Purple (战术执行)
     C_HARNESS = '\033[92m'   # Bright Green (物理调度)
-    C_SYSTEM = '\033[91m'    # Red (物理沙盒异常)
+    C_SYSTEM = '\033[90m'    # Grey (系统消息)
+    C_SYSTEM_ERROR = '\033[91m'    # Red (物理沙盒异常)
+    C_INFO = '\033[94m'      # Blue (一般信息)
     C_RESET = '\033[0m'
 
     COLORS = {
         "USER": C_USER, "PLANNER": C_PLANNER, "EXECUTOR": C_EXECUTOR,
-        "HARNESS": C_HARNESS, "SYSTEM": C_SYSTEM
+        "HARNESS": C_HARNESS, "SYSTEM_ERROR": C_SYSTEM_ERROR
     }
     
     def __init__(self, save_log: bool = False, stage_name: str = "", base_log_dir: str = "logger_history"):
@@ -37,22 +39,22 @@ class AgentLogger():
     def _get_timestamp(self):
         return time.strftime("%H:%M:%S", time.localtime())
 
-    def _get_prefix(self, name: str) -> str:
-        self.event_count += 1
-        return f"[{self._get_timestamp()}] 🔗 [EVENT #{self.event_count}] : {name}"
+    # def _get_prefix(self, name: str) -> str:
+    #     self.event_count += 1
+    #     return f"[{self._get_timestamp()}] 🔗 [EVENT #{self.event_count}] : {name}"
 
-    def _format_log(self, prefix: str, color: str, content: str) -> str:
-        """统一的日志格式协议"""
-        header = f"\n{color}{self._get_prefix(prefix)}{self.C_RESET}"
-        body = f"{color}{content.strip()}{self.C_RESET}\n" + "—"*60
-        return f"{header}\n{body}"
+    # def _format_log(self, prefix: str, color: str, content: str) -> str:
+    #     """统一的日志格式协议"""
+    #     header = f"\n{color}{self._get_prefix(prefix)}{self.C_RESET}"
+    #     body = f"{color}{content.strip()}{self.C_RESET}\n" + "—"*60
+    #     return f"{header}\n{body}"
 
-    def _record_and_print(self, colored_text: str, summary: str = ""):
-        print(colored_text)
-        if self.save_log:
-            clean_text = re.sub(r'\033\[[0-9;]*m', '', colored_text)
-            self.log_buffer.append(clean_text)
-            if summary: self.message_history.append(summary)
+    # def _record_and_print(self, colored_text: str, summary: str = ""):
+    #     print(colored_text)
+    #     if self.save_log:
+    #         clean_text = re.sub(r'\033\[[0-9;]*m', '', colored_text)
+    #         self.log_buffer.append(clean_text)
+    #         if summary: self.message_history.append(summary)
 
     def _append_to_disk(self, content):
         if self.save_log and hasattr(self, 'log_file_path'):
@@ -85,62 +87,37 @@ class AgentLogger():
                 clean_text = re.sub(r'\033\[[0-9;]*m', '', full_log)
                 self.log_buffer.append(clean_text)
                 self._append_to_disk(clean_text)
-
+    def log_info(self, type, message: str,color=None):
+        self.audit("INFO", "LOG", type, message, color=color or self.C_INFO)
 
     # ==========================================
     # STAGE 1 roles: user -- harness -- LLM -- system
     # ==========================================
-    def log_user_to_harness(self, query: str):
-        self.audit("USER", "HARNESS", "Message", query, color=self.C_USER)
+    def log_user_to(self, target, type, query: str):
+        self.audit("USER", target, type, query, color=self.C_USER)
 
-    def log_harness_to_user(self, final_answer: str):
-        self.audit("HARNESS", "USER", "Message", final_answer, color=self.C_HARNESS)
+    def log_harness_to(self, target, type, final_answer: str):
+        self.audit("HARNESS", target, type, final_answer, color=self.C_HARNESS)
 
-    def log_harness_to_llm(self, messages: list):
+    def log_harness_to_llm(self, target, type, messages: list):
         total_messages = len(messages) if isinstance(messages, list) else 1
         summary = f"{total_messages} messages, latest: '{messages[-1].get('content', '')}'" if isinstance(messages, list) else str(messages)
-        self.audit("HARNESS", "LLM (waiting for response)", "Message History", summary, color=self.C_HARNESS)
-
-    def log_llm_to_harness(self, raw_output: str):
-        self.audit("LLM", "HARNESS", "Raw Output", raw_output, color=self.C_PLANNER)
+        self.audit("HARNESS", target, type, summary, color=self.C_HARNESS)
 
     def log_harness_to_system(self, tool_name: str, args: str):
         content = f"Executing Tool: {tool_name}\nArguments: {args}"
         self.audit("HARNESS", "SYSTEM", "Tool Call", content, color=self.C_HARNESS) 
 
+    def log_llm_to(self, start, target, type, raw_output: str):
+        self.audit(start, target, type, raw_output, color=self.C_PLANNER)
 
     def log_system_to_harness(self, tool_name, observation, is_error=False):
-        color = self.C_SYSTEM if is_error else self.C_HARNESS
-        self.audit("SYSTEM", "HARNESS", "Observation", f"Tool: {tool_name}", result=observation, color=color)
+        color = self.C_SYSTEM_ERROR if is_error else self.C_SYSTEM
+        self.audit("SYSTEM", "HARNESS", "System Result", f"Tool: {tool_name}", result=observation, color=color)
 
     # ==========================================
-    # STAGE 2 roles: user -- harness -- planner -- executor -- system
+    # STAGE 2 roles: user -- harness -- planner -- executor(LLM) -- system
     # ==========================================
 
-    def log_planner_to_executor(self, task: str):
-        self.audit("PLANNER", "EXECUTOR", "Task information", task, color=self.C_PLANNER)
-    
-    def log_executor_to_planner(self, result: str):
-        self.audit("EXECUTOR", "PLANNER", "Execution Result", result, color=self.C_EXECUTOR)
-    
-    def log_planner_to_harness(self, directive: str):
-        self.audit("PLANNER", "HARNESS", "Directive", directive, color=self.C_PLANNER)
-    
-    def log_harness_to_planner(self, response: str):
-        self.audit("HARNESS", "PLANNER (waiting for LLM response)", "Message", response, color=self.C_HARNESS)
-    
-    def log_harness_to_executor(self, args: str):
-        self.audit("HARNESS", "EXECUTOR", "Execution Request", args, color=self.C_HARNESS)
-
-    def log_executor_to_harness(self, observation: str):
-        self.audit("EXECUTOR", "HARNESS", "Execution Observation", observation, color=self.C_EXECUTOR)
-
-
-    # # ==========================================
-    # # 磁盘归档
-    # # ==========================================
-    # def flush_to_disk(self, file_name="sample_log.txt"):
-    #     if self.save_log and self.log_buffer:
-    #         with open(file_name, "w", encoding="utf-8") as f:
-    #             f.write("\n".join(self.log_buffer))
-    #         print(f"\n💾 [SYSTEM INFO]: logger saved to: {file_name}")
+    def log_planner_to(self, target, type, task: str):
+        self.audit("PLANNER", target, type, task, color=self.C_PLANNER)
