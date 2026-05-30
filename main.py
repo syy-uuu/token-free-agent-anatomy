@@ -5,6 +5,12 @@ from utils.config import config
 
 from utils.config import config, get_multiline_input
 
+# 告诉 Pydantic 忽略序列化时的类型预期警告
+os.environ["PYDANTIC_ERRORS_OMIT_URL"] = "1" 
+import warnings
+# 强制 Python 的 warnings 模块静默 Pydantic 抛出的各种意外值序列化警告
+warnings.filterwarnings("ignore", message="Pydantic serializer warnings")
+
 # 1. 物理防线：由于在根目录启动，这一行将确保所有子目录（agents, utils）完美互通
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
@@ -52,11 +58,11 @@ def main():
         while True:
             try:
                 prompt = f"{AgentLogger.C_USER}Enter query (Press Enter twice to send, 'q' to quit):\n {AgentLogger.C_RESET}"
-                query = get_multiline_input(prompt)
+                user_goal = get_multiline_input(prompt)
             except (EOFError, KeyboardInterrupt):
                 break
                 
-            if query.strip().lower() in ("q", "exit", ""):
+            if user_goal.strip().lower() in ("q", "exit", ""):
                 break
                 
             #1. USER ➔ HARNESS

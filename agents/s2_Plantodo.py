@@ -25,33 +25,32 @@ You are the Planner Agent with agile and incremental planning capabilities in py
 
 [OUTPUT FORMAT SPECIFICATION]
 Output a root-level JSON object with a single 'tasks' array. Do not wrap in markdown code blocks. Output pure raw JSON.
-
 good example:
 {
   "tasks": [
     {
       "id": 1,
-      "task": "Milestone: Establish environment baseline and verify Tkinter initialization. Context: None. DoD: SUCCESS if running 'execute_test' on a new skeleton file 'calculator_gui.py' initializes a blank Tkinter root window and terminates with exit code 0, FAILURE if ImportError or basic window rendering fails.",
+      "task": "Milestone: Establish project environment baseline and verify structural environment initialization. Context: None. DoD: SUCCESS if running 'execute_test' on the newly created foundational architecture script compiles and initializes with exit code 0 without any syntax anomaly, FAILURE if the target file is empty, missing, or the initial system execution pipeline fails.",
       "status": "pending"
     },
     {
       "id": 2,
-      "task": "Milestone: Implement end-to-end core UI skeleton and clear button action. Context: 'calculator_gui.py'. DoD: SUCCESS if 'calculator_gui.py' contains layout definitions for the main display, digit grid, and a functional 'C' button, AND running 'execute_test' returns SUCCESS with no layout initialization crashes, FAILURE if components lack basic grid layout or crash on render.",
+      "task": "Milestone: Implement the end-to-end core structural skeleton and main baseline entry-point actions. Context: [Specify primary code files]. DoD: SUCCESS if the module contains the essential entry-point layouts, structural signatures, or primary component frameworks, AND running 'execute_test' returns SUCCESS with no initialization or declaration crashes, FAILURE if core data hooks or structural modules are absent or crash on render.",
       "status": "pending"
     },
     {
       "id": 3,
-      "task": "Milestone: Implement high-precision calculation logic with core addition/subtraction. Context: 'calculator_gui.py'. DoD: SUCCESS if a robust precision math function is integrated and verified via 'execute_test' proving '0.1 + 0.2 == 0.3' matches exactly without floating-point loss, FAILURE if result exhibits standard Python precision drift (e.g., 0.30000000000000004).",
+      "task": "Milestone: Implement the underlying core functional engine and specialized logic layer. Context: [Specify primary code files]. DoD: SUCCESS if the data processing backend or analytical algorithms are integrated and verified via 'execute_test' proving strict business rule compliance and data fidelity without precision loss or logic drift, FAILURE if core processing functions exhibit computational drift or fail semantic assertions.",
       "status": "pending"
     },
     {
       "id": 4,
-      "task": "Milestone: Complete full grid binding for all digits, remaining operators, and equals calculation. Context: 'calculator_gui.py'. DoD: SUCCESS if all operational buttons (+, -, *, /, =) are fully bound to the precision math engine, AND running 'execute_test' confirms complete end-to-end integration without any NameError or local variable crossover leakage, FAILURE if any button throws a NameError or variable scope exception.",
+      "task": "Milestone: Complete full pipeline binding between user-facing interfaces, input sources, and downstream functional engines. Context: [Specify primary code files]. DoD: SUCCESS if all user interaction triggers, control inputs, or API endpoints are fully bound to the functional backend engine, AND running 'execute_test' confirms complete end-to-end runtime continuity without any NameError or local variable crossover leakage, FAILURE if runtime variables crash on reference or scope exceptions occur.",
       "status": "pending"
     },
     {
       "id": 5,
-      "task": "Milestone: Inject robust edge-case defenses for division-by-zero and invalid inputs. Context: 'calculator_gui.py'. DoD: SUCCESS if dividing any operand by zero outputs a clean handled text 'Cannot divide by zero' on the display, AND running 'execute_test' verifies no raw ZeroDivisionError traceback escapes to stderr, FAILURE if the program crashes or terminates ungracefully.",
+      "task": "Milestone: Inject robust exception handling defenses for boundary failure cases and invalid input states. Context: [Specify primary code files]. DoD: SUCCESS if triggering extreme inputs or boundary conditions (e.g., division by zero, null objects, out-of-bounds metrics, malformed payloads) gracefully outputs a clean handled fallback response, AND running 'execute_test' verifies no raw unhandled traceback escapes to stderr, FAILURE if the program crashes or terminates ungracefully.",
       "status": "pending"
     }
   ]

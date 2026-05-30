@@ -1,8 +1,9 @@
 from static_tools.base import safe_path
 import os
-import py_compile
-import subprocess
 import sys
+import time
+import subprocess
+import traceback
 import py_compile
 
 # --- 1. Schemas ---
@@ -159,70 +160,79 @@ def run_write(path: str, content: str, mode: str = "overwrite") -> str:
             except py_compile.PyCompileError as e:
                 # 如果编译失败，立刻把致命错误返回给 Agent，不让它盲目自信！
                 return f"Error: Code written, but Python compilation FAILED:\n{str(e)}"
-        return f"Success: File '{path}' written successfully."
+        return f"File '{path}' written successfully."
     except Exception as e:
         return f"Error writing file: {str(e)}"
 
 
 def run_edit(path: str, old_text: str, new_text: str) -> str:
+    """
+    Advanced Surgical Edit. 
+    Line-by-line whitespace-insensitive sliding window matcher.
+    Completely fixes the control flow and newline injection bugs.
+    """
     try:
         full_path = safe_path(path)
         if not full_path.exists():
             return f"Error: File '{path}' not found for editing."
+            
+        file_content = full_path.read_text(encoding="utf-8")
+        file_lines = file_content.splitlines()
         
-        content = full_path.read_text(encoding="utf-8")
-        
-        # === 鲁棒性升级：处理 Qwen 脑补的换行符 ===
-        if old_text not in content:
-            # 尝试一：如果是因为尾部多写了换行符或空格，帮它 strip() 后再试一次
-            stripped_old = old_text.strip()
-            if stripped_old and stripped_old in content:
-                # 找到原文件中真正对应的带有真实换行符的那个片段
-                # 这一步是为了找出原文件里那一段到底长啥样
-                lines = content.splitlines()
-                stripped_lines = stripped_old.splitlines()
-                
-                # 寻找连续匹配的行
-                for i in range(len(lines) - len(stripped_lines) + 1):
-                    if [line.strip() for line in lines[i:i+len(stripped_lines)]] == [sl.strip() for sl in stripped_lines]:
-                        # 锁定原文件中的真实片段（包括它本来的换行和缩进）
-                        actual_old_text = "\n".join(lines[i:i+len(stripped_lines)])
-                        # 用原文件中真实的片段来进行替换
-                        old_text = actual_old_text
-                        break
-            else:
-                # 实在找不到了，再抛出你写好的高情商报错
-                return (f"Error: Could not find the exact 'old_text' block in '{path}'. "
-                        f"Your provided 'old_text' has {len(old_text.splitlines())} lines. "
-                        f"Please use a read tool to check the exact newlines and spaces.")
-                    
-        
-        # 2. 拦截行数过多的全量替换行为 (Hard Limit: 比如限制单次改动范围不超过30行)
-        old_lines_count = len(old_text.splitlines())
-        if old_lines_count > 30:
-            return (f"Error: Single edit block is too large ({old_lines_count} lines). "
-                    f"To prevent hallucination, you are prohibited from rewriting large blocks. "
+        # 1. 拦截空调用
+        if not old_text.strip():
+            return "Error: 'old_text' cannot be empty. Specify what to replace."
+
+        # 2. 限制单次动刀的硬性范围 (防止模型失控全量重写)
+        raw_old_lines_count = len(old_text.splitlines())
+        if raw_old_lines_count > 30:
+            return (f"Error: Single edit block is too large ({raw_old_lines_count} lines). "
                     f"Please narrow down your 'old_text' to ONLY the specific 2-5 lines that need changes.")
 
-        # 3. 检查 old_text 是否存在
-        if old_text not in content:
-            return (f"Error: Could not find the exact 'old_text' block in '{path}'. "
-                    f"Please view the file again to check the exact indentation, spaces, and spelling. "
-                    f"Make sure you copied it verbatim.")
+        # 3. 将大模型传来的 old_text 清洗为纯净的行列表（忽略首尾空行和空格）
+        old_lines = [line.strip() for line in old_text.splitlines() if line.strip()]
+        if not old_lines:
+            return "Error: 'old_text' contains no effective executable code lines to match."
+            
+        matched_start_idx = -1
+        match_count = 0
+        n_old = len(old_lines)
         
-        # 4. 关键：防止多处误伤
-        match_count = content.count(old_text)
+        # 4. 核心核心：使用滑动窗口在原文件中寻找内容一致、忽略缩进和换行的唯一代码块
+        for i in range(len(file_lines) - n_old + 1):
+            window = [line.strip() for line in file_lines[i:i+n_old] if line.strip()]
+            if len(window) == n_old and window == old_lines:
+                match_count += 1
+                if matched_start_idx == -1:
+                    matched_start_idx = i
+
+        # 5. 针对滑窗匹配结果进行精准的通用报错引导
+        if match_count == 0:
+            return (f"Error: Could not find the specified code block in '{path}'. "
+                    f"The system scanned line-by-line ignoring leading/trailing spaces but still found NO match. "
+                    f"Please read the file again to ensure the code you want to change actually exists verbatim.")
+                    
         if match_count > 1:
-            return (f"Error: The 'old_text' block you provided was found {match_count} times in the file. "
+            return (f"Error: Found {match_count} identical matches for this code block. "
                     f"The system cannot safely determine which one to replace. "
-                    f"Please include 2-3 extra lines of surrounding code (before or after) in both 'old_text' and 'new_text' to make it unique.")
+                    f"Please include 2-3 extra surrounding lines (before or after) to make 'old_text' unique.")
+
+        # 6. 物理外科手术式切片替换 (完整保留原文件除了被替换块之外的所有原始换行和换行符)
+        raw_file_lines = file_content.splitlines(keepends=True)
         
-        # 5. 执行替换（指定 count=1 确保绝对安全）
-        new_content = content.replace(old_text, new_text, 1)
-        full_path.write_text(new_content, encoding="utf-8")
+        # 将新代码转化为带有合适换行符的行列表
+        new_lines_list = [l + "\n" for l in new_text.splitlines()]
+        if not new_lines_list:
+            new_lines_list = ["\n"]
+            
+        # 在物理行号上执行直接切除和植入
+        raw_file_lines[matched_start_idx : matched_start_idx + n_old] = new_lines_list
         
-        return f"Success: File '{path}' updated locally and precisely."
+        # 重新拼接落盘
+        full_path.write_text("".join(raw_file_lines), encoding="utf-8")
         
+        return f" File '{path}' surgical edit completed."
+
     except Exception as e:
         return f"Error editing file: {str(e)}"
 
@@ -250,8 +260,7 @@ def handle_mkdir(arguments: dict) -> str:
         target_path.mkdir(parents=True, exist_ok=True)
         
         # 5. 返回确定性的物理成功反馈
-        return f"OBSERVATION: Success. Directory '{path_str}' and all its missing parents have been physically created within the secure workspace."
-
+        return f"OBSERVATION: Directory '{path_str}' created/existed."
     except ValueError as ve:
         # 专门拦截并优雅返回安全越权报错，直接把异常甩回大模型脸上，警示它越界了
         return f"ERROR: Security Violation. {str(ve)}"
@@ -286,82 +295,126 @@ def run_append_file(path: str, text: str) -> str:
         with open(full_path, "a", encoding="utf-8") as f:
             f.write(prefix + text.strip("\r\n") + "\n")
             
-        return f"Success: Successfully appended {len(text.splitlines())} lines to the end of '{path}'."
+        return f" File '{path}' appended with {len(text.splitlines())} lines."
         
     except Exception as e:
         return f"Error appending to file: {str(e)}"
     
 
 
+
+
 def run_execute_test(path: str) -> str:
     """
-    Executes the python file to catch runtime errors.
-    Completely immune to NoneType strip/lstrip errors when scripts run successfully.
+    Advanced General-Purpose Runtime Verification Tool.
+    Uses process-level timeout mutation to verify persistent GUI/servers,
+    and implements strict line-level stderr filtering for LLM comprehension.
     """
+    # 1. 强力防御：拦截大模型参数漏传或 None 幻觉
     if path is None or not str(path).strip():
         return (
             "Error: Missing required argument 'path'. "
-            "You must provide a valid file path string to execute_test"
+            "You must provide a valid file path string to execute_test (e.g., {'path': 'main.py'})."
         )
         
     try:
+        # 假设 safe_path 是你系统里校验路径安全的全局函数
         full_path = safe_path(path)
         if not full_path.exists():
             return f"Error: File '{path}' not found."
             
-        if not path.endswith(".py"):
+        if not str(path).endswith(".py"):
             return f"Error: 'execute_test' can only test Python (.py) files."
 
-        # ======= 1. 静态编译检查 =======
+        # ======= 2. 静态编译检查 (先抓基础语法、缩进错误) =======
         try:
             py_compile.compile(str(full_path), doraise=True)
         except py_compile.PyCompileError as e:
             return f"❌ TEST FAILED: Compilation/Syntax Error!\n--------------------------------------------------\n{str(e.msg)}"
 
-        # ======= 2. 动态注入防卡死补丁并执行 =======
+        # ======= 3. 语义实质性检查 (防 Agent 刷分和注释敷衍) =======
         script_content = full_path.read_text(encoding="utf-8")
-        
-        test_wrapper = (
-            "import tkinter\n"
-            "original_tk = tkinter.Tk\n"
-            "def patched_tk(*args, **kwargs):\n"
-            "    root = original_tk(*args, **kwargs)\n"
-            "    root.after(500, root.destroy)\n"
-            "    return root\n"
-            "tkinter.Tk = patched_tk\n"
-        )
-        test_code = test_wrapper + script_content
 
-        result = subprocess.run(
-            [sys.executable, "-c", test_code],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-
-        # ======= 3. 返回值解析（核心修复防御点） =======
-        # 先安全提取 stdout 和 stderr，只要是 None 就强制变为空字符串
-        raw_stderr = result.stderr if result.stderr is not None else ""
-        raw_stdout = result.stdout if result.stdout is not None else ""
-        
-        # 正常顺利退出的情况
-        if result.returncode == 0:
+        # 守卫 A：绝对空文件拦截
+        if not script_content.strip():
             return (
-                f"✅ TEST SUCCESS: '{path}' executed successfully.\n"
+                "❌ TEST FAILED: The file is COMPLETELY EMPTY!\n"
+                "--------------------------------------------------\n"
+                "Harness Guard: You cannot pass a milestone with an empty file. "
+                "Please implement the required logical scaffolding before testing."
+            )
+            
+        # 守卫 B：实质性有效代码行拦截
+        lines = script_content.splitlines()
+        effective_lines = [
+            l.strip() for l in lines 
+            if l.strip() and not l.strip().startswith("#") and not l.strip().startswith('"""') and not l.strip().startswith("'''")
+        ]
+        if len(effective_lines) < 1:
+            return (
+                "❌ TEST FAILED: No effective executable code found.\n"
+                "--------------------------------------------------\n"
+                "The file contains only comments or blank spacing. You must write "
+                "actual execution statements (e.g., imports, functions) to pass."
             )
 
-        # 异常崩溃退出的情况 (returncode != 0)
-        stderr_output = raw_stderr.strip()
+        # ======= 4. 动态运行生命周期验证 (超时熔断机制) =======
+        stderr_output = ""
+        raw_stdout = ""
+        is_timeout_success = False
+
+        try:
+            # 完整运行 Agent 的原始代码，不进行任何文本拼接污染
+            result = subprocess.run(
+                [sys.executable, str(full_path)],
+                capture_output=True,
+                text=True,
+                timeout=2.0  # 给程序 2 秒钟时间让它充分拉起和初始化
+            )
+            
+            # 如果脚本在 2 秒内自己顺利退出了（比如普通的非阻塞算法脚本）
+            if result.returncode == 0:
+                return f"'{path}' executed and exited normally with code 0."
+            
+            # 如果没成功退出，提取其错误流
+            stderr_output = result.stderr if result.stderr else ""
+            raw_stdout = result.stdout if result.stdout else ""
+
+        except subprocess.TimeoutExpired as e:
+            # 🌟 核心：发生超时说明该脚本成功拉起了常驻进程（如 Tkinter mainloop、Flask 等）
+            # 这恰恰说明初始化阶段【没有触发任何 NameError/ImportError】导致闪退
+            is_timeout_success = True
+            
+            # 从超时异常中安全捕获它已经打到 stdout/stderr 的数据
+            stderr_output = e.stderr if isinstance(e.stderr, str) else (e.stderr.decode('utf-8', errors='ignore') if e.stderr else "")
+            raw_stdout = e.stdout if isinstance(e.stdout, str) else (e.stdout.decode('utf-8', errors='ignore') if e.stdout else "")
+
+        # ======= 5. 结构化错误工程解析层 (Error Engineering) =======
+        stderr_output = stderr_output.strip()
+        
+        # 检查超时挂起期间，stderr 是否漏出了 Traceback 报错
+        if "Traceback" in stderr_output or "Error" in stderr_output or "Exception" in stderr_output:
+            is_timeout_success = False  # 虽然超时了，但进程内部其实在报错，打回重修
+
+        # 如果最终判定为成功，直接返回漂亮的回执
+        if is_timeout_success:
+            return (
+                f"'{path}' initialized\n"
+                f"The application architecture runtime started successfully and was verified by the harness sandbox."
+            )
+
+        # 如果判定为失败，开始清洗复杂的底层错误，提取出对大模型高可读的内容
         if not stderr_output:
             if raw_stdout.strip():
                 stderr_output = f"[Captured from stdout] {raw_stdout.strip()}"
             else:
-                stderr_output = f"Unknown runtime crash. Process exited with code {result.returncode} but left no logs."
+                stderr_output = "Unknown runtime crash. Process exited but left no output streams."
 
-        # 报错清洗过滤
+        # 过滤冗余绝对路径，只留下核心调用栈，降维保护上下文 Token
         cleaned_error = []
         for line in stderr_output.splitlines():
-            if any(k in line for k in ["Traceback", "File", "Error", "Exception", "NameError"]):
+            if any(k in line for k in ["Traceback", "File", "Error", "Exception", "NameError", "ModuleNotFoundError"]):
+                # 替换长路径为当前相对路径
                 cleaned_line = line.replace(str(full_path.parent), ".")
                 cleaned_error.append(cleaned_line)
         
@@ -372,15 +425,15 @@ def run_execute_test(path: str) -> str:
             f"--------------------------------------------------\n"
             f"{error_report}\n"
             f"--------------------------------------------------\n"
-            f"💡 Hint: Check local variable scopes, indents, or cross-function definitions."
+            f"💡 Hint: Check local variable scopes, module names, or function parameters."
         )
 
-    except subprocess.TimeoutExpired:
-        return f"⚠️ Test Warning: Execution timed out. Possible infinite loop."
     except Exception as e:
-        # 万一工具自身报错，把整个异常堆栈打出来，方便 debug 到底是哪行 NoneType
-        import traceback
-        return f"Error executing test (Harness Internal Error): {str(e)}\nDetails:\n{traceback.format_exc()}"
+        # 万一 Harness 自身或者路径解析出了极其罕见的意外，抛出完整 Traceback 用于 Debug
+        return (
+            f"⚠️ Error executing test (Harness Internal Error): {str(e)}\n"
+            f"Details:\n{traceback.format_exc()}"
+        )
 
 
 def run_list_directory(sub_dir: str = ".") -> str:

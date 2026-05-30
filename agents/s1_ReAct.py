@@ -81,7 +81,7 @@ def agent_loop(state: list, logger):
         # 轨 A：处理标准 tool_calls
         if message.tool_calls:
             for tc in message.tool_calls:
-                logger.log_info("debug","Standerd tool call detected")
+                # logger.log_info("debug","Standerd tool call detected")
                 raw_brain_output += f"[Standard Tool Call]: {tc.function.name}({tc.function.arguments})\n"
                 try:
                     args_dict = json.loads(tc.function.arguments) if isinstance(tc.function.arguments, str) else tc.function.arguments
