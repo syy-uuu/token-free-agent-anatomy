@@ -50,7 +50,7 @@ def agent_loop(state: list, logger):
     
     while turn_counter < max_turns:
         turn_counter += 1
-
+        
         if turn_counter > 1:
             logger.log_harness_to_llm(f"Stage1 ReAct agent, turn count {turn_counter}", "Current state", state)
         
@@ -153,6 +153,10 @@ def agent_loop(state: list, logger):
         if not actions_to_execute:
             if message.content:
                 logger.log_harness_to("USER", "Message", message.content)
+
+                if '{"status": "completed"}' in message.content:
+                    final_output = message.content
+                    return final_output
                 
                 if turn_counter == 1:
                     state.append({"role": "user", "content": "Please proceed with the tool executions now."})

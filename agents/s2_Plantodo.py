@@ -14,23 +14,44 @@ MODEL = config.model
 # =====================================================================
 
 PLANNER_SYSTEM_PROMPT = """
-You are the Planner Agent in a Plan-to-Do architecture. Decompose the user's goal into logical, linear sub-tasks (milestones).
+You are the Planner Agent with agile and incremental planning capabilities in python 3.11 environment. Decompose the user's goal into logical, sub-tasks (milestones) to executor.
 
 [CRITICAL RULES]
 1. NO SPECIFIC CODE/COMMANDS in task. The Executor has no long-term memory. Each task must explicitly bundle:
-   - Milestone Objective: What status needs to be achieved, not how to do it.
+   - Milestone Objective: What status needs to be achieved, not how to do it), ask executor to run executor_test if necessary to verify the status.
+   - Context: What data/files are involved (if any).
    - Required Context: Specific files/variables inherited from prior tasks.
    - Definition of Done (DoD): Exact physical verification criteria (what contents/files must exist to succeed, or what patterns mean failure).
 
 [OUTPUT FORMAT SPECIFICATION]
 Output a root-level JSON object with a single 'tasks' array. Do not wrap in markdown code blocks. Output pure raw JSON.
 
-Format Template (Inject Milestone, Context, and DoD strictly into the 'task' field string):
+good example:
 {
   "tasks": [
     {
       "id": 1,
-      "task": "Milestone: [Action objective]. Context: [Data source/files]. DoD: SUCCESS if [exact file exists / text pattern matches], FAILURE if [file missing / unexpected output].",
+      "task": "Milestone: Establish environment baseline and verify Tkinter initialization. Context: None. DoD: SUCCESS if running 'execute_test' on a new skeleton file 'calculator_gui.py' initializes a blank Tkinter root window and terminates with exit code 0, FAILURE if ImportError or basic window rendering fails.",
+      "status": "pending"
+    },
+    {
+      "id": 2,
+      "task": "Milestone: Implement end-to-end core UI skeleton and clear button action. Context: 'calculator_gui.py'. DoD: SUCCESS if 'calculator_gui.py' contains layout definitions for the main display, digit grid, and a functional 'C' button, AND running 'execute_test' returns SUCCESS with no layout initialization crashes, FAILURE if components lack basic grid layout or crash on render.",
+      "status": "pending"
+    },
+    {
+      "id": 3,
+      "task": "Milestone: Implement high-precision calculation logic with core addition/subtraction. Context: 'calculator_gui.py'. DoD: SUCCESS if a robust precision math function is integrated and verified via 'execute_test' proving '0.1 + 0.2 == 0.3' matches exactly without floating-point loss, FAILURE if result exhibits standard Python precision drift (e.g., 0.30000000000000004).",
+      "status": "pending"
+    },
+    {
+      "id": 4,
+      "task": "Milestone: Complete full grid binding for all digits, remaining operators, and equals calculation. Context: 'calculator_gui.py'. DoD: SUCCESS if all operational buttons (+, -, *, /, =) are fully bound to the precision math engine, AND running 'execute_test' confirms complete end-to-end integration without any NameError or local variable crossover leakage, FAILURE if any button throws a NameError or variable scope exception.",
+      "status": "pending"
+    },
+    {
+      "id": 5,
+      "task": "Milestone: Inject robust edge-case defenses for division-by-zero and invalid inputs. Context: 'calculator_gui.py'. DoD: SUCCESS if dividing any operand by zero outputs a clean handled text 'Cannot divide by zero' on the display, AND running 'execute_test' verifies no raw ZeroDivisionError traceback escapes to stderr, FAILURE if the program crashes or terminates ungracefully.",
       "status": "pending"
     }
   ]
@@ -144,7 +165,7 @@ class LocalExecutorAgent:
             try:
                 # 1. 运行 AgentLoop
                 # 注意：确保 agent_loop 返回的是模型解析后的完整内容
-                self.logger.log_harness_to_llm(f"Stage1 ReAct agent, round {step_count}","Task Execution", messages)
+                self.logger.log_harness_to_llm(f"Stage1 ReAct agent, round {step_count}, task ID {task_id}","Task Execution", messages)
                 raw_response = agent_loop(messages, logger=self.logger)
                 
                 # 2. 防御性获取模型输出 (直接访问属性，避免 .get() 报错)
@@ -157,7 +178,7 @@ class LocalExecutorAgent:
 
                 # 5. 必须将本轮输出追加回 messages，这是维持 ReAct 逻辑链条的关键！
                 messages.append({"role": "last result", "content": content})
-                messages.append({"role":"system", "content":"find the true reason why the task failed, and fix with tool_calls"})
+                messages.append({"role":"system", "content":"if you think the task is finished, write in json format in the content \"{ \"status\": \"completed\" }\" to declare the success of the task. if task is not finished, find the true reason why the task failed, and fix with tool_calls"})
                 
             except Exception as e:
                 error_msg = f"Round {step_count} crashed: {str(e)}"
