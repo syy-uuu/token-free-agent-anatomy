@@ -18,6 +18,39 @@ stateDiagram-v2
     }
     Agent --> User: 6. Final Delivery
 ```
+
+flowchart TD
+    %% 系统层级
+    subgraph UI_User [用户交互层]
+        User
+    end
+    
+    subgraph Core_Agent [核心逻辑层]
+        Planner
+        Executor
+    end
+    
+    subgraph Harness_System [基础设施层]
+        Harness
+        System
+    end
+
+    %% 交互链路
+    User <==>|1. 意图/响应| Harness
+    Harness <==>|2. 调度/执行控制| Planner
+    Planner <==>|3. 指令流转| Executor
+    Executor <==>|4. 动作执行| Harness
+    Harness <==>|5. 物理状态/IO| System
+
+    %% 颜色定义
+    classDef harness fill:#00f2ff,stroke:#00f2ff,color:black;
+    classDef core fill:#ffea00,stroke:#ffea00,color:black;
+    classDef user_sys fill:#fff,stroke:#333;
+    
+    class Harness harness;
+    class Planner,Executor core;
+    class User,System user_sys;
+
 🌈 The "Microscope" Observability
 Unlike heavy frameworks, this repository acts as a transparent microscope. It features a strict ANSI-colored logging system that exposes the raw multi-track communication protocol in real-time:
 

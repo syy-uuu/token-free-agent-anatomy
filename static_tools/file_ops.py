@@ -185,9 +185,8 @@ def run_edit(path: str, old_text: str, new_text: str) -> str:
 
         # 2. 限制单次动刀的硬性范围 (防止模型失控全量重写)
         raw_old_lines_count = len(old_text.splitlines())
-        if raw_old_lines_count > 30:
-            return (f"Error: Single edit block is too large ({raw_old_lines_count} lines). "
-                    f"Please narrow down your 'old_text' to ONLY the specific 2-5 lines that need changes.")
+        if raw_old_lines_count > 100:
+            return (f"Error: Single edit block is limited to 100 lines. ")
 
         # 3. 将大模型传来的 old_text 清洗为纯净的行列表（忽略首尾空行和空格）
         old_lines = [line.strip() for line in old_text.splitlines() if line.strip()]
@@ -399,8 +398,7 @@ def run_execute_test(path: str) -> str:
         # 如果最终判定为成功，直接返回漂亮的回执
         if is_timeout_success:
             return (
-                f"'{path}' initialized\n"
-                f"The application architecture runtime started successfully and was verified by the harness sandbox."
+                f"'{path}' executed successfully"
             )
 
         # 如果判定为失败，开始清洗复杂的底层错误，提取出对大模型高可读的内容
@@ -425,7 +423,6 @@ def run_execute_test(path: str) -> str:
             f"--------------------------------------------------\n"
             f"{error_report}\n"
             f"--------------------------------------------------\n"
-            f"💡 Hint: Check local variable scopes, module names, or function parameters."
         )
 
     except Exception as e:

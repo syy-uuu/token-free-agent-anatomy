@@ -14,43 +14,32 @@ MODEL = config.model
 # =====================================================================
 
 PLANNER_SYSTEM_PROMPT = """
-You are the Planner Agent with agile and incremental planning capabilities in python 3.11 environment. Decompose the user's goal into logical, sub-tasks (milestones) to executor.
+You are the Strategic Planner. Your job is to break down user requests into concise, modular, and dependency-clear sub-tasks for a no-long-memory execution agent.
 
-[CRITICAL RULES]
-1. NO SPECIFIC CODE/COMMANDS in task. The Executor has no long-term memory. Each task must explicitly bundle:
-   - Milestone Objective: What status needs to be achieved, not how to do it), ask executor to run executor_test if necessary to verify the status.
-   - Context: What data/files are involved (if any).
-   - Required Context: Specific files/variables inherited from prior tasks.
-   - Definition of Done (DoD): Exact physical verification criteria (what contents/files must exist to succeed, or what patterns mean failure).
+[MACRO STRATEGY: THREE-STAGE LIFECYCLE]
+You MUST design the task list sequentially across these three immutable phases:
 
-[OUTPUT FORMAT SPECIFICATION]
-Output a root-level JSON object with a single 'tasks' array. Do not wrap in markdown code blocks. Output pure raw JSON.
-good example:
+- Phase 1: Objective Explanation & Architecture Alignment
+  - Objective: You MUST describe the final goal concisely and clearly first, and then assign the first task to the executor agent.
+  - Action: Determine the project file structure (modular multi-file or directory structure) and run baseline environment probes (e.g., check Python/package availability).
+
+- Phase 2: Modular Implementation & Progressive Coding
+  - Objective: You MUST implement functional logic progressively.
+  - Action: Break code creation into independent, decoupled subtasks. Enforce modular design constraints (do NOT guide specific function names, but clarify file responsibilities) and pass verified context to successive tasks.
+
+- Phase 3: Rigid Physical Verification
+  - Objective: Final black-box/integration verification.
+  - Action: Execute main entry files or test scripts, capture physical terminal output, and ensure zero-hallucination validation before closing out the loop.
+
+[MICRO TASK FORMATTING SPECIFICATION]
+Output ONLY a strict JSON block matching this structure. No conversational filler or markdown wrappers outside the JSON block.
+
 {
   "tasks": [
     {
       "id": 1,
-      "task": "Milestone: Establish project environment baseline and verify structural environment initialization. Context: None. DoD: SUCCESS if running 'execute_test' on the newly created foundational architecture script compiles and initializes with exit code 0 without any syntax anomaly, FAILURE if the target file is empty, missing, or the initial system execution pipeline fails.",
-      "status": "pending"
-    },
-    {
-      "id": 2,
-      "task": "Milestone: Implement the end-to-end core structural skeleton and main baseline entry-point actions. Context: [Specify primary code files]. DoD: SUCCESS if the module contains the essential entry-point layouts, structural signatures, or primary component frameworks, AND running 'execute_test' returns SUCCESS with no initialization or declaration crashes, FAILURE if core data hooks or structural modules are absent or crash on render.",
-      "status": "pending"
-    },
-    {
-      "id": 3,
-      "task": "Milestone: Implement the underlying core functional engine and specialized logic layer. Context: [Specify primary code files]. DoD: SUCCESS if the data processing backend or analytical algorithms are integrated and verified via 'execute_test' proving strict business rule compliance and data fidelity without precision loss or logic drift, FAILURE if core processing functions exhibit computational drift or fail semantic assertions.",
-      "status": "pending"
-    },
-    {
-      "id": 4,
-      "task": "Milestone: Complete full pipeline binding between user-facing interfaces, input sources, and downstream functional engines. Context: [Specify primary code files]. DoD: SUCCESS if all user interaction triggers, control inputs, or API endpoints are fully bound to the functional backend engine, AND running 'execute_test' confirms complete end-to-end runtime continuity without any NameError or local variable crossover leakage, FAILURE if runtime variables crash on reference or scope exceptions occur.",
-      "status": "pending"
-    },
-    {
-      "id": 5,
-      "task": "Milestone: Inject robust exception handling defenses for boundary failure cases and invalid input states. Context: [Specify primary code files]. DoD: SUCCESS if triggering extreme inputs or boundary conditions (e.g., division by zero, null objects, out-of-bounds metrics, malformed payloads) gracefully outputs a clean handled fallback response, AND running 'execute_test' verifies no raw unhandled traceback escapes to stderr, FAILURE if the program crashes or terminates ungracefully.",
+      "context": "",
+      "task": "",
       "status": "pending"
     }
   ]
@@ -66,9 +55,10 @@ class LocalPlannerAgent:
         """
         [审计日志渲染器]：这里是你的审计核心，保证每次状态变动都有一份清晰的清单
         """
-        table_md = "\n| ID | Task | Status |\n|:---|:---|:---|\n"
+        table_md = "\n| ID | Task | Context | Status |\n|:---|:---|:---|:---|\n"
         for t in self.tasks:
-            table_md += f"| {t['id']} | {t['task']} | {t['status'].upper()} |\n"
+            context = t.get("context", "")
+            table_md += f"| {t['id']} | {t['task']} | {context} | {t['status']} |\n"
         
         self.logger.audit("PLANNER", "HARNESS ➔ EXECUTOR", event_description, table_md, color=self.logger.C_PLANNER)
 
@@ -136,13 +126,13 @@ class LocalPlannerAgent:
 
 
 EXECUTOR_SYSTEM_PROMPT = """
-You are an coding agent. use tools to execute a single micro-task assigned by the Planner. You have no long-term memory.
-
+You are an coding agent. your job is to finish the sub-task assigned by the Planner. 
 [OPERATIONAL PROTOCOLS]
-1. Every action must select a specific tool from tools, NEVER generate raw code blocks or shell commands in the content. The tools are your only interface to interact with the environment and files.
-2. You MUST physically execute the tool, and reach the milestone before declaring the success.
-3. You MUST physically write in json format in the content "{ "status": "completed" }" to declare the success of the task. This is the ONLY valid success declaration protocol.
-4. If error occurs for one tool_call, NEVER retry the same command, you can use the same tool but with different arguments.
+1. You MUST understand current status of the whole task from planner, and then start current sub-task based on the project situation.
+2. Every action must select a specific tool from tools, NEVER generate raw code blocks or shell commands in the content. The tools are your only interface to interact with the environment and files.
+3. You MUST use execute_text tool to check the effectiveness of your code (only python file), never pretend you have successfully completed the task without physical verification.
+4. You MUST physically write in json format in the content "{ "status": "completed" }" and explain current status to planner to declare the success of the task. This is the ONLY valid success declaration protocol.
+5. If error occurs for one tool_call, NEVER retry the same command, you can use the same tool but with different arguments.
 """
 class LocalExecutorAgent:
     def __init__(self, logger):
@@ -154,7 +144,7 @@ class LocalExecutorAgent:
         messages = [
             {"role": "system", "content": self.system_prompt}
         ]
-        messages.append({"role": "user", "content": f"Execute the task: {task}"})
+        messages.append({"role": "user", "content": task})
                 # 2. 执行
         # self.logger.log_harness_to("EXECUTOR", "Message", f"Task ID {task_id}: {task}")
         step_count = 0
@@ -195,17 +185,18 @@ class LocalExecutorAgent:
 def run_orchestrator(user_goal: str, logger):
     planner = LocalPlannerAgent(logger)
     executor = LocalExecutorAgent(logger)
-            # 1. Capture the macro-intent and route it to the Orchestrator
+    # 1. Capture the macro-intent and route it to the Orchestrator
     logger.log_user_to("HARNESS ➔ PLANNER(get initial plan)", "User query", user_goal)
     planner.generate_initial_plan(user_goal)
 
     while True:
         current_step = next((s for s in planner.tasks if s["status"] == "pending"), None)
+        task_description = {"context": current_step["task"], "task": current_step["context"], "status": current_step["status"]} 
         
         if not current_step:
             break
         
-        success, final_observation = executor.execute_single_task(current_step["id"], current_step["task"])
+        success, final_observation = executor.execute_single_task(current_step["id"], task_description)
         
         # 3. 闭环更新（这一步最丝滑）
         status = "success" if success else "failure"
