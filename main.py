@@ -32,7 +32,7 @@ def main():
     print(f"Current model: {config.model}")
     print("select agent:")
     print(" [1] Stage 1: Standard ReAct Loop)")
-    print(" [2] Stage 2: Plan to do (coming soon)")
+    print(" [2] Stage 2: Plan to do")
     print(" [q] Quit")
     print("-" * 50)
     

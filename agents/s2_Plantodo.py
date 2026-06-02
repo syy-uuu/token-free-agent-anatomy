@@ -164,9 +164,8 @@ class LocalExecutorAgent:
                 {"role": "system", "content": self.system_prompt},
                 {
                     "role": "user", 
-                    "content": f"### 1. CURRENT PROJECT TREE\n{current_tree_str}\n\n"
-                            f"### 2. YOUR TASK\n{task}\n\n"
-                            f"### 3. PROTOCOL\nIf you successfully complete the entire task, you MUST declare success by outputting a valid JSON block containing: \"status\": \"completed\"."
+                    "content": f"1. CURRENT PROJECT TREE\n{current_tree_str}\n\n"
+                            f"2. YOUR TASK\n{task}\n\n"
                 }
             ]
         
