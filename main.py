@@ -1,9 +1,7 @@
 import os
 import sys
-from datetime import datetime
-from utils.config import config
-
 from utils.config import config, get_multiline_input
+from utils.env_utils import clean_directory
 
 # 告诉 Pydantic 忽略序列化时的类型预期警告
 os.environ["PYDANTIC_ERRORS_OMIT_URL"] = "1" 
@@ -42,6 +40,7 @@ def main():
     
     if choice == '1':
         logger = AgentLogger(save_log=SHOULD_SAVE, stage_name="stage1")
+        # clean_directory("test/stage1")
         config.set_stage_workdir("stage1")
         print("\n🚀  in processing: Stage 1 ReAct ...\n")
         from agents.s1_ReAct import agent_loop
@@ -74,14 +73,14 @@ def main():
             
     elif choice == '2':
         logger = AgentLogger(save_log=SHOULD_SAVE, stage_name="stage2")
+        # clean_directory("test/stage2")
         config.set_stage_workdir("stage2")
         print("\n🚀  in processing: Stage 2 Plan to Do...\n")
-        
         # Import the Dual-Loop Orchestrator core
         from agents.s2_Plantodo import run_orchestrator
         
         try:
-            prompt = f"{AgentLogger.C_USER}Enter your complex macro-level goal (Press Enter twice to send, 'q' to quit):\n {AgentLogger.C_RESET}"
+            prompt = f"{AgentLogger.C_USER}Enter your query (Press Enter twice to send, 'q' to quit):\n {AgentLogger.C_RESET}"
             user_goal = get_multiline_input(prompt)
         except (EOFError, KeyboardInterrupt):
             return

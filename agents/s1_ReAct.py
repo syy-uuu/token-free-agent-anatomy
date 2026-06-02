@@ -1,48 +1,10 @@
 import json
 from utils.config import config
+from utils.env_utils import clean_and_parse_json_line
 from static_tools import STATIC_SCHEMAS, STATIC_HANDLERS
-
 
 client = config.client
 MODEL = config.model
-
-import json
-
-import json
-import re
-
-def clean_and_parse_json_line(line: str):
-    """
-    工业级防御性探针：专门清洗大模型由于 Attention 稀释导致的非标 JSON 连击毛刺
-    例如：{"name": "...", "arguments": {...}}} -> 尾部多了一个 }
-    """
-    line = line.strip()
-    if not line:
-        return None
-        
-    # 尝试直接解析
-    try:
-        return json.loads(line)
-    except Exception:
-        pass
-
-    # 算法防御自愈：如果是由于尾部多写了闭合括号导致的报错，进行物理裁剪
-    # 从右侧查找最后一个完美的 JSON 闭合结构
-    if line.endswith("}}}"):
-        try:
-            return json.loads(line[:-1]) # 切掉最后一个多余的 }
-        except Exception:
-            pass
-
-    # 备用方案：通过正则强行提取最外层匹配的 {} 块
-    try:
-        match = re.search(r'(\{.*?\})(?=\s*$)|\{.*\}', line)
-        if match:
-            return json.loads(match.group(0))
-    except Exception:
-        pass
-        
-    return None
 
 def agent_loop(state: list, logger):
     turn_counter = 0

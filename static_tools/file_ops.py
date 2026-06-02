@@ -38,31 +38,7 @@ FILE_TOOLS_SCHEMAS = [
             }
         }
     },
-{
-    "type": "function",
-    "function": {
-        "name": "edit_file",
-        "description": "CRITICAL: Surgical precision edit ONLY. Modifies a specific local block of text within an existing file. DO NOT provide the entire file content in 'old_text' or 'new_text'. Only provide the exact 3-5 lines that need to change plus minimal surrounding context. For multiple changes, call this tool multiple times sequentially.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string", 
-                    "description": "Relative path to the file."
-                },
-                "old_text": {
-                    "type": "string", 
-                    "description": "The exact existing text block to find. Must be copied verbatim from the file, including identical indentation, spaces, and newlines. Typically 1-5 lines."
-                },
-                "new_text": {
-                    "type": "string", 
-                    "description": "The new text block to replace 'old_text' with. Keep it minimal and focused only on the fix."
-                }
-            },
-            "required": ["path", "old_text", "new_text"]
-        }
-    }
-},
+
     {
     "type": "function",
     "function": {
@@ -77,6 +53,52 @@ FILE_TOOLS_SCHEMAS = [
                 }
             },
             "required": ["path"]
+        }
+    }
+},
+{
+    "type": "function",
+    "function": {
+        "name": "view_file_with_line_numbers",
+        "description": "Read the contents of an existing file with line numbers prefixed (e.g., '  1 | import os'). Always call this tool to inspect the exact line numbers BEFORE calling 'edit_file_by_lines'.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Relative path to the file to inspect."
+                }
+            },
+            "required": ["path"]
+        }
+    }
+},
+{
+    "type": "function",
+    "function": {
+        "name": "edit_file_by_lines",
+        "description": "CRITICAL: Surgical precision edit by line numbers. Replaces a specific line range [start_line, end_line] with 'new_content'. You MUST call 'view_file_with_line_numbers' first to verify the current line numbers.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Relative path to the file."
+                },
+                "start_line": {
+                    "type": "integer",
+                    "description": "The line number where the replacement should start (1-indexed, inclusive). Based on the output of view_file_with_line_numbers."
+                },
+                "end_line": {
+                    "type": "integer",
+                    "description": "The line number where the replacement should end (1-indexed, inclusive). To delete lines without adding new code, set new_content to empty string."
+                },
+                "new_content": {
+                    "type": "string",
+                    "description": "The new code that will replace the specified line range. Keep it minimal and focused only on the fix."
+                }
+            },
+            "required": ["path", "start_line", "end_line", "new_content"]
         }
     }
 },
@@ -99,13 +121,13 @@ FILE_TOOLS_SCHEMAS = [
     "type": "function",
     "function": {
         "name": "execute_test",
-        "description": "CRITICAL VERIFICATION TOOL. Executes the specified Python script in a controlled sandbox to check for syntax errors, compilation failures, and runtime Exceptions (e.g., NameError, ImportError). Always call this tool immediately after modifying any script to ensure your changes didn't break the application.",
+        "description": "CRITICAL: Executes the specified Python script to perform syntax, compilation, and early initialization checks. For persistent applications (e.g., servers, infinite loops, background daemons), the system will automatically enforce a 2-second timeout. If no exceptions occur within these 2 seconds, it will be judged as successful and return a success message. NOTE: A successful test execution ONLY guarantees that your script is free of syntax errors or early crashes—it DOES NOT mean your business logic is complete. Always verify your implementation satisfies the requirements after testing.",
         "parameters": {
             "type": "object",
             "properties": {
                 "path": {
                     "type": "string", 
-                    "description": "Relative path to the Python file you want to test (e.g., 'gui_code.py')."
+                    "description": "Relative path to the Python file you want to test (e.g., 'main.py')."
                 }
             },
             "required": ["path"]
@@ -165,86 +187,81 @@ def run_write(path: str, content: str, mode: str = "overwrite") -> str:
         return f"Error writing file: {str(e)}"
 
 
-def run_edit(path: str, old_text: str, new_text: str) -> str:
-    """
-    Advanced Surgical Edit. 
-    Line-by-line whitespace-insensitive sliding window matcher.
-    Completely fixes the control flow and newline injection bugs.
-    """
+def run_view_file_with_line_numbers(path: str) -> str:
+    """读取文件并自动带上行号，方便 Agent 观察后进行精准定位修改"""
+    full_path = safe_path(path)
+    if not full_path.exists():
+        return f"Error: File '{path}' does not exist."
     try:
-        full_path = safe_path(path)
-        if not full_path.exists():
-            return f"Error: File '{path}' not found for editing."
+        with open(full_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+        
+        output = []
+        for idx, line in enumerate(lines, 1):
+            output.append(f"{idx:4d} | {line}")
+        return "".join(output)
+    except Exception as e:
+        return f"Error reading file: {str(e)}"
+
+def run_edit_file_by_lines(path: str, start_line: int, end_line: int, new_content: str) -> str:
+    """
+    通过指定行号区间，局部替换文件内容（基于行号的精确定向修改工具）。
+    
+    :param path: 文件相对路径，例如 'main.py'
+    :param start_line: 修改的起始行号（包含，从 1 开始计数）
+    :param end_line: 修改的结束行号（包含，从 1 开始计数）
+    :param new_content: 用来替换该区间的新代码字符串
+    """
+    full_path = safe_path(path)
+    if not full_path.exists():
+        return f"Error: File '{path}' does not exist."
+    try:
+        # 1. 读取原文件所有行
+        with open(full_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+        
+        total_lines = len(lines)
+        
+        # 2. 边界条件防御与容错
+        if start_line < 1:
+            start_line = 1
+        if end_line > total_lines:
+            end_line = total_lines
+        if start_line > total_lines:
+            return f"Error: start_line ({start_line}) is beyond the total {total_lines} lines in the file ({total_lines})."
             
-        file_content = full_path.read_text(encoding="utf-8")
-        file_lines = file_content.splitlines()
+        if start_line > end_line:
+            return f"Error: start_line ({start_line}) cannot be greater than end_line ({end_line})."
+
+        # 3. 解析新内容（处理换行符，确保末尾有换行）
+        new_lines = [line + '\n' if not line.endswith('\n') else line 
+                     for line in new_content.splitlines()]
         
-        # 1. 拦截空调用
-        if not old_text.strip():
-            return "Error: 'old_text' cannot be empty. Specify what to replace."
+        # 如果新内容完全为空，说明 Agent 想删除这个区间的代码
+        if not new_content.strip() and len(new_lines) == 1 and new_lines[0] == '\n':
+            new_lines = []
 
-        # 2. 限制单次动刀的硬性范围 (防止模型失控全量重写)
-        raw_old_lines_count = len(old_text.splitlines())
-        if raw_old_lines_count > 100:
-            return (f"Error: Single edit block is limited to 100 lines. ")
+        # 4. 核心替换逻辑 (注意 Python 列表索引从 0 开始，所以要 -1)
+        # lines[start_line-1 : end_line] 就是要被干掉的老代码
+        lines[start_line - 1 : end_line] = new_lines
 
-        # 3. 将大模型传来的 old_text 清洗为纯净的行列表（忽略首尾空行和空格）
-        old_lines = [line.strip() for line in old_text.splitlines() if line.strip()]
-        if not old_lines:
-            return "Error: 'old_text' contains no effective executable code lines to match."
+        # 5. 写回文件
+        with open(full_path, 'w', encoding='utf-8') as f:
+            f.writelines(lines)
             
-        matched_start_idx = -1
-        match_count = 0
-        n_old = len(old_lines)
-        
-        # 4. 核心核心：使用滑动窗口在原文件中寻找内容一致、忽略缩进和换行的唯一代码块
-        for i in range(len(file_lines) - n_old + 1):
-            window = [line.strip() for line in file_lines[i:i+n_old] if line.strip()]
-            if len(window) == n_old and window == old_lines:
-                match_count += 1
-                if matched_start_idx == -1:
-                    matched_start_idx = i
-
-        # 5. 针对滑窗匹配结果进行精准的通用报错引导
-        if match_count == 0:
-            return (f"Error: Could not find the specified code block in '{path}'. "
-                    f"The system scanned line-by-line ignoring leading/trailing spaces but still found NO match. "
-                    f"Please read the file again to ensure the code you want to change actually exists verbatim.")
-                    
-        if match_count > 1:
-            return (f"Error: Found {match_count} identical matches for this code block. "
-                    f"The system cannot safely determine which one to replace. "
-                    f"Please include 2-3 extra surrounding lines (before or after) to make 'old_text' unique.")
-
-        # 6. 物理外科手术式切片替换 (完整保留原文件除了被替换块之外的所有原始换行和换行符)
-        raw_file_lines = file_content.splitlines(keepends=True)
-        
-        # 将新代码转化为带有合适换行符的行列表
-        new_lines_list = [l + "\n" for l in new_text.splitlines()]
-        if not new_lines_list:
-            new_lines_list = ["\n"]
-            
-        # 在物理行号上执行直接切除和植入
-        raw_file_lines[matched_start_idx : matched_start_idx + n_old] = new_lines_list
-        
-        # 重新拼接落盘
-        full_path.write_text("".join(raw_file_lines), encoding="utf-8")
-        
-        return f" File '{path}' surgical edit completed."
+        return f"Success: Updated lines {start_line} to {end_line} in '{path}' successfully."
 
     except Exception as e:
-        return f"Error editing file: {str(e)}"
+        return f"Error occurred while editing file: {str(e)}"
 
-    
 def handle_mkdir(arguments: dict) -> str:
-# 1. 刚性提取参数
+    # 1. 刚性提取参数
     path_str = arguments.get("path")
     if not path_str:
         return "ERROR: Missing required argument 'path'."
         
     try:
-        # 2. 调用你的通用安全路径校验器进行物理越权拦截
-        # 如果越权，这里会直接抛出 ValueError 并被下面的 except 捕获
+        # 2. 调用通用安全路径校验器（假设返回的是 pathlib.Path 对象）
         target_path = safe_path(path_str)
 
         # 3. 幂等性检查（避免无效的磁盘 IO）
@@ -254,18 +271,33 @@ def handle_mkdir(arguments: dict) -> str:
             else:
                 return f"ERROR: Path '{path_str}' exists but it is a FILE, cannot convert to directory."
 
-        # 4. 物理落地：级联创建目录 (等价于 mkdir -p)
-        # exist_ok=True 预防多线程并发冲突，parents=True 开启多级级联创建
+        # 🚀 4. 防呆与自愈拦截机制 (防御性编程)
+        # 判定条件：如果是以 .py 结尾，或者文件名里包含点 '.'（如 .txt, .json）
+        if target_path.suffix == '.py' or ('.' in target_path.name):
+            # 自动降级提取其父目录
+            dir_to_create = target_path.parent
+            
+            # 如果切出来的父目录已经是当前工作区顶级根目录了，提示无需物理创建
+            if str(dir_to_create) == '.' or dir_to_create == Path():
+                return f"OBSERVATION: Target path '{path_str}' seems to be a file in the root workspace. No directory needs to be created."
+            
+            # 刚性物理落地：改为创建它的父目录！
+            dir_to_create.mkdir(parents=True, exist_ok=True)
+            return f"OBSERVATION: Warning - You passed a file path '{path_str}' to mkdir. The system has automatically healed this by creating its parent directory instead: '{dir_to_create}/'. Please use 'write_file' next to create the actual file."
+
+        # 🚀 5. 正常创建目录逻辑
+        # parents=True 等价于 mkdir -p
         target_path.mkdir(parents=True, exist_ok=True)
         
-        # 5. 返回确定性的物理成功反馈
-        return f"OBSERVATION: Directory '{path_str}' created/existed."
+        # 6. 返回确定性的物理成功反馈
+        return f"OBSERVATION: Directory '{path_str}' successfully created."
+
     except ValueError as ve:
-        # 专门拦截并优雅返回安全越权报错，直接把异常甩回大模型脸上，警示它越界了
+        # 专门拦截并优雅返回安全越权报错
         return f"ERROR: Security Violation. {str(ve)}"
         
     except Exception as e:
-        # 兜底其余系统级物理报错（如磁盘满、无权限等）
+        # 兜底其余系统级物理报错
         return f"ERROR: Failed to create directory due to system error: {str(e)}"
     
 def run_append_file(path: str, text: str) -> str:
