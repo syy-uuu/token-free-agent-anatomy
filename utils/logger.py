@@ -4,14 +4,14 @@ import json
 from pathlib import Path
 
 class AgentLogger():
-    # 身份色彩协议定义 (Identity Color Protocol)
-    C_USER = '\033[36m'      # Cyan (用户接口)
-    C_PLANNER = '\033[93m'   # Bright Yellow (战略指挥)
-    C_EXECUTOR = '\033[95m'  # Purple (战术执行)
-    C_HARNESS = '\033[92m'   # Bright Green (物理调度)
-    C_SYSTEM = '\033[90m'    # Grey (系统消息)
-    C_SYSTEM_ERROR = '\033[91m'    # Red (物理沙盒异常)
-    C_INFO = '\033[94m'      # Blue (一般信息)
+    # Identity Color Protocol
+    C_USER = '\033[36m'      # Cyan (user interface)
+    C_PLANNER = '\033[93m'   # Bright Yellow (strategic planning)
+    C_EXECUTOR = '\033[95m'  # Purple (tactical execution)
+    C_HARNESS = '\033[92m'   # Bright Green (orchestration)
+    C_SYSTEM = '\033[90m'    # Grey (system message)
+    C_SYSTEM_ERROR = '\033[91m'    # Red (sandbox/runtime error)
+    C_INFO = '\033[94m'      # Blue (general info)
     C_RESET = '\033[0m'
 
     COLORS = {
@@ -39,23 +39,6 @@ class AgentLogger():
     def _get_timestamp(self):
         return time.strftime("%H:%M:%S", time.localtime())
 
-    # def _get_prefix(self, name: str) -> str:
-    #     self.event_count += 1
-    #     return f"[{self._get_timestamp()}] 🔗 [EVENT #{self.event_count}] : {name}"
-
-    # def _format_log(self, prefix: str, color: str, content: str) -> str:
-    #     """统一的日志格式协议"""
-    #     header = f"\n{color}{self._get_prefix(prefix)}{self.C_RESET}"
-    #     body = f"{color}{content.strip()}{self.C_RESET}\n" + "—"*60
-    #     return f"{header}\n{body}"
-
-    # def _record_and_print(self, colored_text: str, summary: str = ""):
-    #     print(colored_text)
-    #     if self.save_log:
-    #         clean_text = re.sub(r'\033\[[0-9;]*m', '', colored_text)
-    #         self.log_buffer.append(clean_text)
-    #         if summary: self.message_history.append(summary)
-
     def _append_to_disk(self, content):
         if self.save_log and hasattr(self, 'log_file_path'):
             with open(self.log_file_path, "a", encoding="utf-8") as f:
@@ -65,13 +48,13 @@ class AgentLogger():
             self.event_count += 1
             self.step_count += 1
             
-            # 根据 source 自动匹配颜色，如果指定了 color 则覆盖
+            # Auto-select color by source; explicit color overrides it
             color = color or self.COLORS.get(source, self.C_RESET)
             
-            # 构建头部
+            # Build header
             header = f"\n[{self._get_timestamp()}] 🔗 [EVENT #{self.event_count}] : {source} ➔ {target}"
             
-            # 构建审计正文
+            # Build audit body
             body_lines = [
                 f"Type: {payload_type}",
                 f"Content: {content.strip()}"
@@ -81,7 +64,7 @@ class AgentLogger():
                 
             full_log = f"{color}{header}\n" + "\n".join(body_lines) + f"\n{'-'*60}{self.C_RESET}"
             
-            # 打印并归档
+            # Print and archive
             print(full_log)
             if self.save_log:
                 clean_text = re.sub(r'\033\[[0-9;]*m', '', full_log)

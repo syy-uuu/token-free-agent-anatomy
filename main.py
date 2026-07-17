@@ -3,13 +3,13 @@ import sys
 from utils.config import config, get_multiline_input
 from utils.env_utils import clean_directory
 
-# 告诉 Pydantic 忽略序列化时的类型预期警告
+# Tell Pydantic to ignore expected type warnings during serialization
 os.environ["PYDANTIC_ERRORS_OMIT_URL"] = "1" 
 import warnings
-# 强制 Python 的 warnings 模块静默 Pydantic 抛出的各种意外值序列化警告
+# Force Python's warnings module to silence various unexpected-value serialization warnings from Pydantic
 warnings.filterwarnings("ignore", message="Pydantic serializer warnings")
 
-# 1. 物理防线：由于在根目录启动，这一行将确保所有子目录（agents, utils）完美互通
+# 1. Physical safeguard: since execution starts at the repo root, this ensures all subdirectories (agents, utils) are importable
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from utils.logger import AgentLogger
@@ -36,7 +36,7 @@ def main():
     print(" [q] Quit")
     print("-" * 50)
     
-    choice = input("请输入编号 [1/2/q]: ").strip()
+    choice = input("Type your choice [1/2/q]: ").strip()
     
     if choice == '1':
         logger = AgentLogger(save_log=SHOULD_SAVE, stage_name="stage1")
@@ -52,8 +52,7 @@ def main():
                 f"3. BUG LOOP PREVENTION: If your bash command returns no output or unexpected results, do not repeat the same command. You must check the file content, rewrite the script to add print statements or debugging info, and re-run."
                         )
         history = [{"role":"system","content":SYSTEM}]
-        if len(history) > 20:
-            history = [history[0]] + history[-10:]
+
         while True:
             try:
                 prompt = f"{AgentLogger.C_USER}Enter query (Press Enter twice to send, 'q' to quit):\n {AgentLogger.C_RESET}"
@@ -63,7 +62,8 @@ def main():
                 
             if user_goal.strip().lower() in ("q", "exit", ""):
                 break
-                
+            if len(history) > 20:
+                history = [history[0]] + history[-10:]                
             #1. USER ➔ HARNESS
             logger.log_user_to("HARNESS ➔ LLM", "Message", user_goal)
             history.append({"role": "user", "content": user_goal})

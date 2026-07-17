@@ -38,9 +38,9 @@ def agent_loop(state: list, logger):
         actions_to_execute = []
         raw_brain_output = ""
 
-        # ==================== 【收拢解析层】 ====================
+        # ==================== 【Action Parsing Layer】 ====================
 
-        # 轨 A：处理标准 tool_calls
+        #  A： tool_calls
         if message.tool_calls:
             for tc in message.tool_calls:
                 # logger.log_info("debug","Standerd tool call detected")
@@ -56,21 +56,20 @@ def agent_loop(state: list, logger):
                     "arguments": args_dict if isinstance(args_dict, dict) else {}
                 })
 
-        # 轨 B：拦截并清洗大模型在 content 里手写的 JSON 乱象
+        #  B： message.content
         if message.content:
             raw_brain_output += f"[Message Text]: {message.content}\n"
             
             if not actions_to_execute:
                 content_str = message.content.strip()
                 
-                # 逐行切开并推入物理清洗探针
+                
                 for line_idx, line in enumerate(content_str.split('\n')):
                     parsed_line = clean_and_parse_json_line(line)
                     if not parsed_line:
                         continue
                         
                     try:
-                        # 支持直升根节点或嵌套在 action 对象里的定义
                         a_name = parsed_line.get("name") or parsed_line.get("action", {}).get("name")
                         a_args = parsed_line.get("arguments") or parsed_line.get("action", {}).get("arguments")
                         
@@ -90,9 +89,9 @@ def agent_loop(state: list, logger):
                     except Exception:
                         pass
 
-        # ==================== 【上下文记忆协议对齐】 ====================
+        # ==================== 【context alignment】 ====================
         
-        # 核心防空转自愈：如果抓到了轨 B 工具，在推入上下文历史前，强行转换为标准 tool_calls 格式
+        # change tool_calls to align with the extracted actions
         if actions_to_execute and not message.tool_calls:
             aligned_tool_calls = []
             for action in actions_to_execute:
@@ -106,12 +105,12 @@ def agent_loop(state: list, logger):
                 })
             message.tool_calls = aligned_tool_calls
 
-        # 安全合流推入历史记录
+
         state.append(message)
 
-        # ==================== 【决策与物理执行层】 ====================
+        # ==================== 【decision and physical execution layer】 ====================
 
-        # 情况 1：无有效工具，属于正常自然语言结束或开场白
+        # Case 1: No valid tools, normal natural language ending or opening remarks
         if not actions_to_execute:
             if message.content:
                 logger.log_harness_to("USER", "Message", message.content)
@@ -127,19 +126,19 @@ def agent_loop(state: list, logger):
             final_output = message.content if message.content else ""
             break
 
-        # 情况 2：并发/多连击工具物理落地
+        # Case 2: Concurrent/multi-hit tool physical execution
         for action in actions_to_execute:
             t_id = action["id"]
             t_name = action["name"]
             t_args = action["arguments"]
             
-            # 4-1. HARNESS ➔ SYSTEM 广播
+            # 4-1. HARNESS ➔ SYSTEM broadcast
             logger.log_harness_to_system(tool_name=t_name, args=t_args)
             
             is_error = False
             try:
                 if t_name in STATIC_HANDLERS:
-                    # 真正物理击打磁盘和控制台
+                    # Actual physical execution on disk and console
                     result = STATIC_HANDLERS[t_name](**t_args)
                 else:
                     result = f"Error: Unknown tool '{t_name}'"
@@ -148,10 +147,10 @@ def agent_loop(state: list, logger):
                 result = f"Runtime Error during execution: {str(e)}"
                 is_error = True
             
-            # 5. SYSTEM ➔ HARNESS 观测回传
+            # 5. SYSTEM ➔ HARNESS
             logger.log_system_to_harness(tool_name=t_name, observation=result, is_error=is_error)
             
-            # 物理拼装回传协议树（保证每个伪造 ID 和原始定义绝对绑定）
+            # 6. HARNESS ➔ LLM
             state.append({
                 "role": "tool",
                 "tool_call_id": t_id,
@@ -159,7 +158,6 @@ def agent_loop(state: list, logger):
                 "content": str(result)
             })
 
-        # 完成多连击，继续推进循环大盘
         continue
 
     else:

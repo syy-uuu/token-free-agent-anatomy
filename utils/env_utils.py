@@ -7,28 +7,28 @@ import shutil
 
 def clean_and_parse_json_line(line: str):
     """
-    工业级防御性探针：专门清洗大模型由于 Attention 稀释导致的非标 JSON 连击毛刺
-    例如：{"name": "...", "arguments": {...}}} -> 尾部多了一个 }
+    Production-grade defensive probe: cleans malformed JSON artifacts caused by LLM attention dilution.
+    Example: {"name": "...", "arguments": {...}}} -> one extra trailing }.
     """
     line = line.strip()
     if not line:
         return None
         
-    # 尝试直接解析
+    # Try direct parsing first
     try:
         return json.loads(line)
     except Exception:
         pass
 
-    # 算法防御自愈：如果是由于尾部多写了闭合括号导致的报错，进行物理裁剪
-    # 从右侧查找最后一个完美的 JSON 闭合结构
+    # Defensive self-healing: if parsing fails due to an extra closing brace, trim it
+    # Check from the right side for the last valid JSON closure
     if line.endswith("}}}"):
         try:
-            return json.loads(line[:-1]) # 切掉最后一个多余的 }
+            return json.loads(line[:-1]) # Remove the final extra }
         except Exception:
             pass
 
-    # 备用方案：通过正则强行提取最外层匹配的 {} 块
+    # Fallback: use regex to extract the outermost matching {} block
     try:
         match = re.search(r'(\{.*?\})(?=\s*$)|\{.*\}', line)
         if match:
@@ -40,7 +40,7 @@ def clean_and_parse_json_line(line: str):
 
 
 def generate_dynamic_tree(start_dir=".", max_depth=3):
-    # 需要忽略的文件夹或文件
+    # Folders/files to ignore
     ignored_dirs = {'.git', '__pycache__', '.venv', 'node_modules', '.pytest_cache'}
     
     tree_lines = ["."]
@@ -50,7 +50,7 @@ def generate_dynamic_tree(start_dir=".", max_depth=3):
             return
         
         try:
-            # 获取当前目录下所有文件和文件夹，并排序以保持稳定输出
+            # Get all files/folders in the current directory and sort for stable output
             items = sorted(os.listdir(current_dir))
         except PermissionError:
             return
@@ -63,10 +63,10 @@ def generate_dynamic_tree(start_dir=".", max_depth=3):
             is_last = (index == len(items) - 1)
             connector = "└── " if is_last else "├── "
             
-            # 添加当前行
+            # Add current line
             tree_lines.append(f"{'    ' * (depth - 1)}{connector}{item}")
             
-            # 如果是文件夹，递归扫描
+            # If this is a directory, recurse into it
             if os.path.isdir(path):
                 _build_tree(path, depth + 1)
 
@@ -80,12 +80,12 @@ def clean_directory(path):
             item_path = os.path.join(full_path, item)
             try:
                 if os.path.isdir(item_path):
-                    shutil.rmtree(item_path)  # 递归删除子文件夹
+                    shutil.rmtree(item_path)  # Recursively delete subdirectories
                 else:
-                    os.remove(item_path)      # 删除文件
+                    os.remove(item_path)      # Delete files
             except Exception as e:
                 print(f"⚠️ Failed to delete {item_path}: {e}")
 
 
-# 在 Harness 组装 Executor Prompt 时调用：
+# Called when the Harness assembles the Executor prompt:
 # current_tree_str = generate_dynamic_tree(workdir)

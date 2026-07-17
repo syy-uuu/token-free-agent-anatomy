@@ -3,7 +3,7 @@
 A hyper-lightweight AI Agent Harness repository built completely from scratch, optimized specifically for **learning, observing and understanding how an agent truly works under the hood** by running open-source light models (such as Qwen-2.5-7b) in a local environment.
 
 
-## 📊 The Agent Architecture
+### 📊 The Agent Architecture - stage 1
 
 ```mermaid
 stateDiagram-v2
@@ -18,31 +18,32 @@ stateDiagram-v2
     }
     Agent --> User: 6. Final Delivery
 ```
-
+### 📊 The Agent Architecture - stage 2
+```mermaid
 flowchart TD
     %% 系统层级
-    subgraph UI_User [用户交互层]
+    subgraph UI_User [user interaction layer]
         User
     end
     
-    subgraph Core_Agent [核心逻辑层]
+    subgraph Core_Agent [core logic layer]
         Planner
         Executor
     end
     
-    subgraph Harness_System [基础设施层]
+    subgraph Harness_System [infra layer]
         Harness
         System
     end
 
-    %% 交互链路
-    User <==>|1. 意图/响应| Harness
-    Harness <==>|2. 调度/执行控制| Planner
-    Planner <==>|3. 指令流转| Executor
-    Executor <==>|4. 动作执行| Harness
-    Harness <==>|5. 物理状态/IO| System
+    %% chain
+    User <==>|1. query/response| Harness
+    Harness <==>|2. manage/control| Planner
+    Planner <==>|3. arrange task| Executor
+    Executor <==>|4. execute| Harness
+    Harness <==>|5. state/IO| System
 
-    %% 颜色定义
+    %% color
     classDef harness fill:#00f2ff,stroke:#00f2ff,color:black;
     classDef core fill:#ffea00,stroke:#ffea00,color:black;
     classDef user_sys fill:#fff,stroke:#333;
@@ -50,8 +51,9 @@ flowchart TD
     class Harness harness;
     class Planner,Executor core;
     class User,System user_sys;
+```
 
-🌈 The "Microscope" Observability
+### 🌈 The "Microscope" Observability
 Unlike heavy frameworks, this repository acts as a transparent microscope. It features a strict ANSI-colored logging system that exposes the raw multi-track communication protocol in real-time:
 
 - 🔵 Cyan (User ⇄ Harness): Human cognitive input and intent.
@@ -61,7 +63,7 @@ Unlike heavy frameworks, this repository acts as a transparent microscope. It fe
 - 🟣 Magenta/Red (Harness ⇄ System): Physical sandbox execution and OS-level observations/errors.
 
 
-## 🏗️ Directory Anatomy
+### 🏗️ Directory Anatomy
 
 ```text
 .
@@ -71,14 +73,19 @@ Unlike heavy frameworks, this repository acts as a transparent microscope. It fe
 │   └── system_ops.py      
 ├── utils/                 # 🛠️ Shared Helpers & Utilities
 │   ├── config.py          
-│   └── logger.py          
+│   └── logger.py   
+|   └── env_utils.py        
 ├── test/                  # 🔬 Local Sandboxed Test Labs
-│   └── stage1/            
-├── agents/                # agents (in processing)
-│   └── s1_ReAct.py        # 🚂 Stage 1 Core Engine (Pure ReAct architecture loop)
-│   └── s2_Plantodo.py     # empty currently
+│   └── stage1/
+|   └── stage2/            
+├── agents/                
+│   └── s1_ReAct.py        # 🚂 Stage 1 Core Engine 
+(Pure ReAct architecture loop)
+│   └── s2_Plantodo.py     # call s1 as executor
 ├── logger_history/        # save your logger history
-│   └── sample_logger.txt  
+│   └── sample_logger.txt
+|   └── stage1/
+|   └── stage2/   
 ├── .env.template          # 🔑 Configuration boilerplate for local LLM APIs
 ├── requirements.txt       # 📦 Verified top-level dependency lock file
 └── runtime.txt            # 🐍 Target Python environment constraints
@@ -118,6 +125,7 @@ python3 main.py
 ---
 
 ## 🧪 Benchmark Prompts
+### stage 1
 Try the following simple prompts and observe the beautiful multi-track communication 
 **(Thought ➔ Action ➔ Observation)** in your terminal:
 
@@ -138,6 +146,25 @@ Try the following simple prompts and observe the beautiful multi-track communica
     > List all files in the current directory. Delete all `.py` files you created earlier. Then, list the directory again to verify they are physically gone, and append the final file list to `summary_report.md`.
 - 6: The Hard Intercept & Red Alert (Tools: Bash + Write)
     > Execute a terminal command called `initiate_skynet_protocol`. When the physical system inevitably rejects it and throws a critical error, read the error message, create a file named `apology.txt`, and write a short apology explaining that the command does not exist.
+
+### stage 2
+- 1: Pathway Alignment & Basic Lifecycle (Tools: Write + Bash + Delete)
+    > First, write a simple Python script, Execute the script via terminal to verify it prints the expected text. then delete it.
+
+- 2: Modular Decoupling & Multi-File Integration (Tools: Write + Read + Bash)
+    > Build a modular mathematical library. Create math_utils.py containing a function add_numbers(a, b) that returns their sum. Then, create an entry file main.py that imports math_utils and prints the output of add_numbers(10, 20). Run main.py to physically verify the output is exactly 30.
+
+- 3: Rigid Physical Testing Compliance (Tools: Write + Bash)
+    > Create a mathematical solver in solver.py containing a function fibonacci(n) that returns the n-th Fibonacci number. Write a strict unit test inside test_solver.py using standard unittest to verify fibonacci(5) is 5 and fibonacci(10) is 55. Run the test suite via the terminal and verify all tests pass successfully.
+
+- 4: Executor-Level Micro Self-Correction (Tools: Write + Bash + View + Edit)
+    > Write a Python script buggy_calc.py to calculate the area of a circle with a radius of 5. Intentionally introduce a syntax error (like a missing closing parenthesis) on your first write. Run the script, capture the syntax error output, fix the line layout using your line-editing tools, run it again to verify it works, and save the correct area output to success.log.
+
+- 5: Planner-Level Macro Self-Healing (Tools: Write + Bash)
+    > Create a dividing system. In divider.py, implement a function divide(a, b) that simply returns a / b. Run a testing execution that calls divide(10, 0). When this causes a physical zero-division crash, the system must trigger a replan to modify divider.py to handle dividing by zero gracefully (by returning None), and run the test script again to verify it no longer crashes.
+
+- 6: Physical Disaster Recovery & Dependency Restoration (Tools: Write + Bash)
+    > Build a config-driven file reading system. Create analyzer.py which reads a configuration file config.json to find the value of "target_file", and then reads the content of that target file. Do NOT create the target file initially. When analyzer.py is executed, it will crash with a FileNotFoundError. The system must catch this failure, trigger a macro replan to generate the missing file containing default dummy text, and execute the pipeline again until it successfully logs the contents.
 
 ## ⚠️ Protocol Compatibility Note
 

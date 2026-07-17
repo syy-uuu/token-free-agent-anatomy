@@ -69,7 +69,7 @@ class LocalPlannerAgent:
 
     def _audit_tasks(self, event_description: str):
         """
-        [审计日志渲染器]：这里是你的审计核心，保证每次状态变动都有一份清晰的清单
+        [audit] Log the current task list in a markdown table format for auditing purposes.
         """
         table_md = "\n| ID | Context | Task | Status |\n|:---|:---|:---|:---|\n"
         for t in self.tasks:
@@ -159,7 +159,7 @@ class LocalExecutorAgent:
     def execute_single_task(self, task_id: str, task: str) -> tuple[bool, str]:
             current_tree_str = generate_dynamic_tree(config.workdir)
             
-            # 1. 初始 Prompt 组装：确保规则、目录、任务层级清晰
+            # 1. Initial prompt assembly: ensure rules, directory, and task hierarchy are clear
             messages = [
                 {"role": "system", "content": self.system_prompt},
                 {
@@ -171,7 +171,7 @@ class LocalExecutorAgent:
         
             step_count = 0
             
-            last_tool_call_args = None  # 用于追踪连续重复的工具调用
+            last_tool_call_args = None  # Used to track consecutive repeated tool calls
 
             while step_count < self.max_react_steps:
                 self.logger.log_info("current project tree", current_tree_str)
@@ -179,31 +179,31 @@ class LocalExecutorAgent:
                 try:
                     self.logger.log_harness_to_llm(f"Stage1 ReAct agent, task ID {task_id}, round {step_count}", "Task Execution", messages)
                     
-                    # 2. 运行大模型拿到思考和工具意图
+                    # 2. Run the large model to get thoughts and tool intentions
                     raw_response = agent_loop(messages, logger=self.logger)
                     content = getattr(raw_response, 'content', str(raw_response)) or ""
                     tool_calls = getattr(raw_response, 'tool_calls', None)
 
-                    # 4. “成功协议”握手 (JSON 优先)
+                    # 4. "Success protocol" handshake (JSON first)
                     if '"status": "completed"' in content or (isinstance(content, str) and "status" in content and "completed" in content):
                         return True, content
                     
-                    # 5. 工具执行核心分流
+                    # 5. Core tool execution routing
                     if tool_calls:
-                        # 💡 注意：这里需要你实际执行工具的逻辑。下面是示意：
+                        # 💡 Note: You need to implement the actual tool execution logic here. The following is an example:
                         for tool_call in tool_calls:
                             tool_name = tool_call.function.name
                             tool_args = tool_call.function.arguments
                             
-                            # 执行你的真实工具，拿到结果字符串
+                            # 🌟 5-1. Dead loop prevention: check if the current tool call is identical to the last one
                             tool_result = self.execute_static_tool(tool_name, tool_args) 
                             
-                            # 🌟 6. 正确的死循环/错误拦截点：检查【工具返回结果】是否包含错误
+                            # 🌟 6. Correct dead loop/error interception point: check if the tool result contains errors
                             tool_result_lower = str(tool_result).lower()
                             error_indicators = ["error", "exception", "traceback", "not found", "failed", "could not find"]
                             
                             if any(indicator in tool_result_lower for indicator in error_indicators):
-                                # 上一次工具挂了，立刻给模型发送强力的置顶警告（以 user 身份注入）
+                                # The previous tool failed, immediately send a strong top-level warning to the model (injected as user)
                                 messages.append({
                                     "role": "user", 
                                     "content": """⚠️ [CRITICAL HARNESS NOTICE] ⚠️
@@ -216,7 +216,7 @@ class LocalExecutorAgent:
                                     3. Then try editing again."""
                                 })
                     else:
-                        # 如果大模型既没有宣布结束，又没有调用工具，说明它在梦游
+                        # If no tool calls are detected, prompt the model to either declare completion or invoke a tool
                         messages.append({
                             "role": "user",
                             "content": "You did not output any tool call or declare completion. If the task is done, output {\"status\": \"completed\"}. Otherwise, invoke a tool to proceed."
@@ -254,11 +254,11 @@ def run_orchestrator(user_goal: str, logger):
         
         success, final_observation = executor.execute_single_task(current_step["id"], task_description)
         
-        # 3. 闭环更新（这一步最丝滑）
+        # 3. update task status in planner
         status = "success" if success else "failure"
         planner.update_task_status(current_step["id"], status, final_observation)
         # logger.log_harness_to("USER",f"Task {current_step['id']} marked as {status}.")
         
         if not success:
-            # 重规划时，让 Planner 直接基于当前的 self.tasks 重新计算
+            # replan on failure
             planner.tasks = planner.replan_on_failure(planner.tasks, current_step["id"], final_observation)

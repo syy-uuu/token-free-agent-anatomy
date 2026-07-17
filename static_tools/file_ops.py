@@ -173,14 +173,14 @@ def run_write(path: str, content: str, mode: str = "overwrite") -> str:
     try:
         full_path.parent.mkdir(parents=True, exist_ok=True)
         full_path.write_text(content, encoding="utf-8")
-        # 2. 如果是 Python 文件，立刻进行语法和编译静态检查
+        # 2. If this is a Python file, immediately run syntax and compilation checks
         if path.endswith(".py"):
             try:
-                # py_compile 只会检查语法错误（如 IndentationError、SyntaxError）
-                # 如果要检查 NameError（未定义变量），可以用 flake8 或 ruff 这种轻量工具
+                # py_compile only checks syntax errors (e.g., IndentationError, SyntaxError)
+                # To catch NameError (undefined variables), use lightweight tools like flake8 or ruff
                 py_compile.compile(str(full_path), doraise=True)
             except py_compile.PyCompileError as e:
-                # 如果编译失败，立刻把致命错误返回给 Agent，不让它盲目自信！
+                # If compilation fails, immediately return a fatal error to the Agent
                 return f"Error: Code written, but Python compilation FAILED:\n{str(e)}"
         return f"File '{path}' written successfully."
     except Exception as e:
@@ -188,7 +188,7 @@ def run_write(path: str, content: str, mode: str = "overwrite") -> str:
 
 
 def run_view_file_with_line_numbers(path: str) -> str:
-    """读取文件并自动带上行号，方便 Agent 观察后进行精准定位修改"""
+    """Read a file and automatically prefix line numbers for precise Agent edits."""
     full_path = safe_path(path)
     if not full_path.exists():
         return f"Error: File '{path}' does not exist."
@@ -205,24 +205,24 @@ def run_view_file_with_line_numbers(path: str) -> str:
 
 def run_edit_file_by_lines(path: str, start_line: int, end_line: int, new_content: str) -> str:
     """
-    通过指定行号区间，局部替换文件内容（基于行号的精确定向修改工具）。
+    Partially replace file content by a specified line range (precise line-based editing tool).
     
-    :param path: 文件相对路径，例如 'main.py'
-    :param start_line: 修改的起始行号（包含，从 1 开始计数）
-    :param end_line: 修改的结束行号（包含，从 1 开始计数）
-    :param new_content: 用来替换该区间的新代码字符串
+    :param path: Relative file path, for example 'main.py'
+    :param start_line: Start line number of the edit (inclusive, 1-indexed)
+    :param end_line: End line number of the edit (inclusive, 1-indexed)
+    :param new_content: New code string used to replace the specified range
     """
     full_path = safe_path(path)
     if not full_path.exists():
         return f"Error: File '{path}' does not exist."
     try:
-        # 1. 读取原文件所有行
+        # 1. Read all lines from the original file
         with open(full_path, 'r', encoding='utf-8') as f:
             lines = f.readlines()
         
         total_lines = len(lines)
         
-        # 2. 边界条件防御与容错
+        # 2. Boundary checks and fault tolerance
         if start_line < 1:
             start_line = 1
         if end_line > total_lines:
@@ -233,19 +233,19 @@ def run_edit_file_by_lines(path: str, start_line: int, end_line: int, new_conten
         if start_line > end_line:
             return f"Error: start_line ({start_line}) cannot be greater than end_line ({end_line})."
 
-        # 3. 解析新内容（处理换行符，确保末尾有换行）
+        # 3. Parse new content (handle newlines and ensure trailing newline)
         new_lines = [line + '\n' if not line.endswith('\n') else line 
                      for line in new_content.splitlines()]
         
-        # 如果新内容完全为空，说明 Agent 想删除这个区间的代码
+        # If new content is fully empty, the Agent intends to delete this range
         if not new_content.strip() and len(new_lines) == 1 and new_lines[0] == '\n':
             new_lines = []
 
-        # 4. 核心替换逻辑 (注意 Python 列表索引从 0 开始，所以要 -1)
-        # lines[start_line-1 : end_line] 就是要被干掉的老代码
+        # 4. Core replacement logic (Python list indexing starts at 0, so use -1)
+        # lines[start_line-1 : end_line] is the old code to be replaced
         lines[start_line - 1 : end_line] = new_lines
 
-        # 5. 写回文件
+        # 5. Write back to file
         with open(full_path, 'w', encoding='utf-8') as f:
             f.writelines(lines)
             
@@ -255,49 +255,49 @@ def run_edit_file_by_lines(path: str, start_line: int, end_line: int, new_conten
         return f"Error occurred while editing file: {str(e)}"
 
 def handle_mkdir(arguments: dict) -> str:
-    # 1. 刚性提取参数
+    # 1. Strictly extract required argument
     path_str = arguments.get("path")
     if not path_str:
         return "ERROR: Missing required argument 'path'."
         
     try:
-        # 2. 调用通用安全路径校验器（假设返回的是 pathlib.Path 对象）
+        # 2. Call the common safe-path validator (assumed to return pathlib.Path)
         target_path = safe_path(path_str)
 
-        # 3. 幂等性检查（避免无效的磁盘 IO）
+        # 3. Idempotency check (avoid unnecessary disk I/O)
         if target_path.exists():
             if target_path.is_dir():
                 return f"OBSERVATION: Directory '{path_str}' already exists. No action needed."
             else:
                 return f"ERROR: Path '{path_str}' exists but it is a FILE, cannot convert to directory."
 
-        # 🚀 4. 防呆与自愈拦截机制 (防御性编程)
-        # 判定条件：如果是以 .py 结尾，或者文件名里包含点 '.'（如 .txt, .json）
+        # 4. Defensive guard and self-healing interception mechanism
+        # Rule: if the path ends with .py or the file name contains '.' (e.g., .txt, .json)
         if target_path.suffix == '.py' or ('.' in target_path.name):
-            # 自动降级提取其父目录
+            # Automatically downgrade to its parent directory
             dir_to_create = target_path.parent
             
-            # 如果切出来的父目录已经是当前工作区顶级根目录了，提示无需物理创建
+            # If the parent is already workspace root, no physical directory creation is needed
             if str(dir_to_create) == '.' or dir_to_create == Path():
                 return f"OBSERVATION: Target path '{path_str}' seems to be a file in the root workspace. No directory needs to be created."
             
-            # 刚性物理落地：改为创建它的父目录！
+            # Apply strict physical action: create its parent directory instead
             dir_to_create.mkdir(parents=True, exist_ok=True)
             return f"OBSERVATION: Warning - You passed a file path '{path_str}' to mkdir. The system has automatically healed this by creating its parent directory instead: '{dir_to_create}/'. Please use 'write_file' next to create the actual file."
 
-        # 🚀 5. 正常创建目录逻辑
-        # parents=True 等价于 mkdir -p
+        # 5. Normal directory creation logic
+        # parents=True is equivalent to mkdir -p
         target_path.mkdir(parents=True, exist_ok=True)
         
-        # 6. 返回确定性的物理成功反馈
+        # 6. Return deterministic physical-success feedback
         return f"OBSERVATION: Directory '{path_str}' successfully created."
 
     except ValueError as ve:
-        # 专门拦截并优雅返回安全越权报错
+        # Specifically intercept and gracefully return security-violation errors
         return f"ERROR: Security Violation. {str(ve)}"
         
     except Exception as e:
-        # 兜底其余系统级物理报错
+        # Fallback for other system-level physical errors
         return f"ERROR: Failed to create directory due to system error: {str(e)}"
     
 def run_append_file(path: str, text: str) -> str:
@@ -310,11 +310,11 @@ def run_append_file(path: str, text: str) -> str:
         if not text.strip():
             return "Error: Cannot append empty text."
 
-        # 读取原有内容，检查末尾的换行符
+        # Read existing content and check trailing newline
         content = full_path.read_text(encoding="utf-8")
         
-        # 智能容错：确保原有内容和新内容之间有且仅有合适的换行
-        # 如果文件不是以换行符结尾，帮模型补一个，防止新代码跟老代码挤在同一行
+        # Smart tolerance: ensure exactly proper spacing/newlines between old and new content
+        # If the file does not end with a newline, add one to prevent line concatenation
         if content and not content.endswith("\n"):
             prefix = "\n\n"
         elif content and content.endswith("\n") and not content.endswith("\n\n"):
@@ -322,7 +322,7 @@ def run_append_file(path: str, text: str) -> str:
         else:
             prefix = ""
             
-        # 执行追加
+        # Execute append
         with open(full_path, "a", encoding="utf-8") as f:
             f.write(prefix + text.strip("\r\n") + "\n")
             
@@ -341,7 +341,7 @@ def run_execute_test(path: str) -> str:
     Uses process-level timeout mutation to verify persistent GUI/servers,
     and implements strict line-level stderr filtering for LLM comprehension.
     """
-    # 1. 强力防御：拦截大模型参数漏传或 None 幻觉
+    # 1. Strong defense: intercept missing-argument or None hallucination cases
     if path is None or not str(path).strip():
         return (
             "Error: Missing required argument 'path'. "
@@ -349,7 +349,7 @@ def run_execute_test(path: str) -> str:
         )
         
     try:
-        # 假设 safe_path 是你系统里校验路径安全的全局函数
+        # Assume safe_path is the global function that validates path security
         full_path = safe_path(path)
         if not full_path.exists():
             return f"Error: File '{path}' not found."
@@ -357,16 +357,16 @@ def run_execute_test(path: str) -> str:
         if not str(path).endswith(".py"):
             return f"Error: 'execute_test' can only test Python (.py) files."
 
-        # ======= 2. 静态编译检查 (先抓基础语法、缩进错误) =======
+        # ======= 2. Static compilation checks (catch basic syntax/indentation errors first) =======
         try:
             py_compile.compile(str(full_path), doraise=True)
         except py_compile.PyCompileError as e:
             return f"❌ TEST FAILED: Compilation/Syntax Error!\n--------------------------------------------------\n{str(e.msg)}"
 
-        # ======= 3. 语义实质性检查 (防 Agent 刷分和注释敷衍) =======
+        # ======= 3. Semantic substance checks (prevent score gaming with comments only) =======
         script_content = full_path.read_text(encoding="utf-8")
 
-        # 守卫 A：绝对空文件拦截
+        # Guard A: block completely empty files
         if not script_content.strip():
             return (
                 "❌ TEST FAILED: The file is COMPLETELY EMPTY!\n"
@@ -375,7 +375,7 @@ def run_execute_test(path: str) -> str:
                 "Please implement the required logical scaffolding before testing."
             )
             
-        # 守卫 B：实质性有效代码行拦截
+        # Guard B: require substantive executable lines
         lines = script_content.splitlines()
         effective_lines = [
             l.strip() for l in lines 
@@ -389,62 +389,62 @@ def run_execute_test(path: str) -> str:
                 "actual execution statements (e.g., imports, functions) to pass."
             )
 
-        # ======= 4. 动态运行生命周期验证 (超时熔断机制) =======
+        # ======= 4. Dynamic runtime lifecycle verification (timeout circuit breaker) =======
         stderr_output = ""
         raw_stdout = ""
         is_timeout_success = False
 
         try:
-            # 完整运行 Agent 的原始代码，不进行任何文本拼接污染
+            # Run the Agent's original code directly without any text concatenation pollution
             result = subprocess.run(
                 [sys.executable, str(full_path)],
                 capture_output=True,
                 text=True,
-                timeout=2.0  # 给程序 2 秒钟时间让它充分拉起和初始化
+                timeout=2.0  # Allow 2 seconds for startup and initialization
             )
             
-            # 如果脚本在 2 秒内自己顺利退出了（比如普通的非阻塞算法脚本）
+            # If the script exits successfully within 2 seconds (e.g., non-blocking scripts)
             if result.returncode == 0:
                 return f"'{path}' executed and exited normally with code 0."
             
-            # 如果没成功退出，提取其错误流
+            # If it does not exit successfully, extract stderr/stdout
             stderr_output = result.stderr if result.stderr else ""
             raw_stdout = result.stdout if result.stdout else ""
 
         except subprocess.TimeoutExpired as e:
-            # 🌟 核心：发生超时说明该脚本成功拉起了常驻进程（如 Tkinter mainloop、Flask 等）
-            # 这恰恰说明初始化阶段【没有触发任何 NameError/ImportError】导致闪退
+            # Core idea: timeout means the script successfully started a persistent process (e.g., Tkinter/Flask)
+            # This usually indicates initialization did not crash with NameError/ImportError
             is_timeout_success = True
             
-            # 从超时异常中安全捕获它已经打到 stdout/stderr 的数据
+            # Safely capture stdout/stderr already emitted before timeout
             stderr_output = e.stderr if isinstance(e.stderr, str) else (e.stderr.decode('utf-8', errors='ignore') if e.stderr else "")
             raw_stdout = e.stdout if isinstance(e.stdout, str) else (e.stdout.decode('utf-8', errors='ignore') if e.stdout else "")
 
-        # ======= 5. 结构化错误工程解析层 (Error Engineering) =======
+        # ======= 5. Structured error-engineering parsing layer =======
         stderr_output = stderr_output.strip()
         
-        # 检查超时挂起期间，stderr 是否漏出了 Traceback 报错
+        # Check whether stderr still leaked a Traceback/error during timeout hang
         if "Traceback" in stderr_output or "Error" in stderr_output or "Exception" in stderr_output:
-            is_timeout_success = False  # 虽然超时了，但进程内部其实在报错，打回重修
+            is_timeout_success = False  # Timed out, but process was actually failing internally
 
-        # 如果最终判定为成功，直接返回漂亮的回执
+        # If finally judged successful, return a clean receipt
         if is_timeout_success:
             return (
                 f"'{path}' executed successfully"
             )
 
-        # 如果判定为失败，开始清洗复杂的底层错误，提取出对大模型高可读的内容
+        # If judged failed, clean low-level noise and keep high-readability error content
         if not stderr_output:
             if raw_stdout.strip():
                 stderr_output = f"[Captured from stdout] {raw_stdout.strip()}"
             else:
                 stderr_output = "Unknown runtime crash. Process exited but left no output streams."
 
-        # 过滤冗余绝对路径，只留下核心调用栈，降维保护上下文 Token
+        # Filter redundant absolute paths and keep core stack information
         cleaned_error = []
         for line in stderr_output.splitlines():
             if any(k in line for k in ["Traceback", "File", "Error", "Exception", "NameError", "ModuleNotFoundError"]):
-                # 替换长路径为当前相对路径
+            # Replace long absolute paths with current relative path
                 cleaned_line = line.replace(str(full_path.parent), ".")
                 cleaned_error.append(cleaned_line)
         
@@ -458,7 +458,7 @@ def run_execute_test(path: str) -> str:
         )
 
     except Exception as e:
-        # 万一 Harness 自身或者路径解析出了极其罕见的意外，抛出完整 Traceback 用于 Debug
+        # If a rare harness/path-resolution failure occurs, return full traceback for debugging
         return (
             f"⚠️ Error executing test (Harness Internal Error): {str(e)}\n"
             f"Details:\n{traceback.format_exc()}"
@@ -471,14 +471,14 @@ def run_list_directory(sub_dir: str = ".") -> str:
     Optimized for LLM context parsing.
     """
     try:
-        # 1. 路径安全校验 (假设你的工作区根目录可以通过 WORKSPACE_ROOT 获取)
-        # 这里用当前目录做演示，实际工程中请限制在 sandbox 内
+        # 1. Path security validation (assume workspace root is obtained via WORKSPACE_ROOT)
+        # Current directory is used here for demonstration; production should restrict to sandbox
         workspace_root = safe_path(".")
         
-        # 计算目标路径
+        # Compute target path
         target_path = safe_path(sub_dir)
         
-        # 安全防御：防止 Agent 通过 ../../../ 逃逸出工作区
+        # Security defense: prevent escaping workspace via ../../../
         if os.path.commonpath([workspace_root]) != os.path.commonpath([workspace_root, target_path]):
             return "Error: Access denied. You cannot list directories outside the project workspace."
             
@@ -488,25 +488,25 @@ def run_list_directory(sub_dir: str = ".") -> str:
         if not target_path.is_dir():
             return f"Error: '{sub_dir}' is a file, not a directory. Use read_file to view its content."
 
-        # 2. 遍历目录并提取结构化元数据
+        # 2. Traverse directory and extract structured metadata
         dirs_list = []
         files_list = []
         
-        # 忽略对 Agent 而言是噪音的底层干扰项
+        # Ignore low-level noisy items for Agent reasoning
         IGNORE_PATTERNS = {".git", ".pytest_cache", "__pycache__", ".DS_Store", ".venv", "venv"}
 
         for entry in target_path.iterdir():
             if entry.name in IGNORE_PATTERNS or entry.name.endswith(".pyc"):
                 continue
                 
-            # 获取修改时间和大小
+            # Get modified time and size
             stat = entry.stat()
             mod_time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(stat.st_mtime))
             
             if entry.is_dir():
                 dirs_list.append(f"📁 {entry.name}/ [Directory] | Modified: {mod_time}")
             else:
-                # 转换人类可读的大小
+                # Convert to human-readable file size
                 size_bytes = stat.st_size
                 if size_bytes < 1024:
                     size_str = f"{size_bytes} B"
@@ -515,7 +515,7 @@ def run_list_directory(sub_dir: str = ".") -> str:
                     
                 files_list.append(f"📄 {entry.name} ({size_str}) | Modified: {mod_time}")
 
-        # 3. 组装成极易被 LLM 语义提取的 Markdown 报告
+        # 3. Assemble a Markdown report that is easy for LLM semantic parsing
         output = [f"### 🗂️ Target Directory: '{sub_dir}'"]
         
         if not dirs_list and not files_list:
