@@ -31,9 +31,10 @@ def main():
 
     print(f"Current model: {config.model}")
     print("select agent:")
-    print(" [1] Stage 1: Standard ReAct Loop)")
+    print(" [1] Stage 1: Standard ReAct Loop")
     print(" [2] Stage 2: Plan to do")
     print(" [q] Quit")
+    print("press 「enter」 two times to submit query")
     print("-" * 50)
     
     choice = input("Type your choice [1/2/q]: ").strip()
