@@ -42,13 +42,6 @@ flowchart TD
     Planner <==>|3. arrange task| Executor
     Executor <==>|4. execute| Harness
     Harness <==>|5. state/IO| System
-
-    %% color
-    classDef harness fill:#7DD3FC,stroke:#0284C7,color:#000;
-    classDef core fill:#FDE68A,stroke:#D97706,color:#000;
-
-    class Harness harness;
-    class Planner,Executor core;
 ```
 
 ### 🌈 The "Microscope" Observability
