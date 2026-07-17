@@ -44,13 +44,11 @@ flowchart TD
     Harness <==>|5. state/IO| System
 
     %% color
-    classDef harness fill:#00f2ff,stroke:#00f2ff,color:black;
-    classDef core fill:#ffea00,stroke:#ffea00,color:black;
-    classDef user_sys fill:#fff,stroke:#333;
-    
+    classDef harness fill:#7DD3FC,stroke:#0284C7,color:#000;
+    classDef core fill:#FDE68A,stroke:#D97706,color:#000;
+
     class Harness harness;
     class Planner,Executor core;
-    class User,System user_sys;
 ```
 
 ### 🌈 The "Microscope" Observability
